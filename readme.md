@@ -12,11 +12,13 @@ Subdirectories contain code snippets and examples inspired from the books.
 ### Building a runnable program
 
 ```bash
-cargo new --bin <project-name>
+cargo new --bin <id>-<project-name> --name <project-name>
 ```
 
 ### Building a library
 
 ```bash
-cargo new --lib <project-name>
+cargo new --lib <id>-<project-name> --name <project-name>
 ```
+
+The naming is important here because I want my examples in chronological order.
