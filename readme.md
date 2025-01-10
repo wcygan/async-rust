@@ -9,6 +9,20 @@ References:
 
 Subdirectories contain code snippets and examples inspired from the books.
 
+### Running the examples
+
+The directories will either contain a runnable binary, or some code that has tests associated with it. You can run the code with:
+
+```bash
+# Run a binary
+cargo run
+```
+
+```bash
+# Run tests
+cargo test
+```
+
 ### Building a runnable program
 
 ```bash
