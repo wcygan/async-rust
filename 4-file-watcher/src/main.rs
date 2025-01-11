@@ -1,3 +1,4 @@
+use clap::Parser;
 use std::path::PathBuf;
 use std::time::Duration;
 use tokio::fs::File;
@@ -6,17 +7,26 @@ use tokio::sync::watch;
 use tokio::time::sleep;
 
 /// This is a simple file watcher that watches a file for changes and prints the changes to the console.
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+struct Args {
+    /// Path to the file to watch
+    #[arg(short, long)]
+    filepath: String,
+}
+
 #[tokio::main]
 async fn main() {
+    let args = Args::parse();
     let (tx, mut rx) = watch::channel(false);
 
     // Spawn a task to watch for file changes
-    tokio::spawn(watch_file_changes(tx));
+    tokio::spawn(watch_file_changes(tx, args.filepath.clone()));
 
     // Read the file and print the contents when the file changes
     loop {
         let _ = rx.changed().await;
-        let contents = read_file("log.txt").await.unwrap();
+        let contents = read_file(&args.filepath).await.unwrap();
         println!("{}", contents);
     }
 }
@@ -28,11 +38,11 @@ async fn read_file(file_path: &str) -> Result<String, std::io::Error> {
     Ok(contents)
 }
 
-async fn watch_file_changes(tx: watch::Sender<bool>) {
-    let path = PathBuf::from("log.txt");
+async fn watch_file_changes(tx: watch::Sender<bool>, file_path: String) {
+    let path = PathBuf::from(file_path);
     let mut last_modified = None;
     loop {
-        if let(Ok(metadata)) = path.metadata() {
+        if let Ok(metadata) = path.metadata() {
             let modified = metadata.modified().unwrap();
 
             // If the file has been modified, send a message to the receiver
