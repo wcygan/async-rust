@@ -1,0 +1,9 @@
+[package]
+name = "file-writer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+clap = { version = "4.5.26", features = ["derive"] }
+nanoid = "0.4.0"
+tokio = { version = "1.43.0", features = ["full"] }
