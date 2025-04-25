@@ -1,0 +1,12 @@
+---
+description: 
+globs: 
+alwaysApply: false
+---
+# Project Purpose
+
+This project is dedicated to learning and experimenting with asynchronous programming concepts in Rust and Tokio.
+
+The subdirectories contain various code examples and small projects related to async Rust, often inspired by learning materials like books or online resources. Refer to the main [readme.md](mdc:readme.md) for more details on the structure and running examples.
+
+This is modeled as one rust workspace with crates for each example.
