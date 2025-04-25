@@ -3,5 +3,9 @@ name = "processes-vs-threads"
 version = "0.1.0"
 edition = "2021"
 
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
 [dependencies]
-sysinfo = "0.29"
+rayon = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+sysinfo = { workspace = true }

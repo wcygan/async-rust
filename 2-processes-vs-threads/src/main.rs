@@ -1,7 +1,7 @@
 use std::process::Command;
 use std::thread;
 use std::time::Duration;
-use sysinfo::{Pid, PidExt, ProcessExt, System, SystemExt};
+use sysinfo::{Pid, System};
 
 fn get_memory_info() -> (u64, u64) {
     let sys = System::new_all();
