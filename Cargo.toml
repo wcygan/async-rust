@@ -7,6 +7,7 @@ members = [
     "5-file-writer",
     "6-async-tail-f",
     "7-hello-server",
+    "8-basic-counting-future",
 ]
 resolver = "2"
 
@@ -33,4 +34,4 @@ tower = "0.4.13" # tower 0.5 is not compatible with axum 0.7
 tower-http = { version = "0.5.2", features = ["trace"] }
 serde = { version = "1.0.219", features = ["derive"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-tracing = "0.1.41" 
+tracing = "0.1.41"
