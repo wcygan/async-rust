@@ -1,0 +1,41 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Tokio Best Practices
+
+This document outlines key best practices for using the Tokio asynchronous runtime in Rust, based on common patterns and official guidance.
+
+**When to Use Async/Tokio:** Tokio excels at **I/O-bound tasks** (network requests, database interactions, file system operations) where tasks spend significant time waiting. Async allows the runtime to switch to other tasks during these waits, improving concurrency and resource utilization.
+
+## Core Principles
+
+1.  **Avoid Blocking the Executor:** Tokio uses a *cooperative* scheduler. Tasks must yield control voluntarily and quickly (typically within **10-100 microseconds**) so other tasks can run. **Never** perform long-running synchronous computations or *any* blocking I/O (like `std::fs`, `std::net`) directly on Tokio worker threads.
+    *   **Solution:** Use `tokio::task::spawn_blocking` to move blocking code to a dedicated thread pool managed by Tokio, allowing the async worker threads to remain unblocked.
+
+2.  **Understand Futures:** Rust `Future`s are the computation itself, not just handles. They are **lazy** and do nothing until `.await`ed (polled).
+    *   When a future can't make progress (e.g., waiting for I/O), it returns `Poll::Pending` and registers a `Waker`. The reactor notifies the executor via the `Waker` when the resource is ready, allowing polling to resume.
+    *   Key properties: **Zero-cost** (no overhead beyond the state machine), **stackless**, and **cooperative**.
+
+3.  **Manage Async "Color":** `async fn` functions can only be directly called/awaited from other async contexts. Synchronous functions cannot directly `.await`. This is the "function coloring problem".
+    *   **Solution:** Carefully design which parts of your application need to be async (primarily I/O and coordination) and which can remain sync. Use channels (`tokio::sync::mpsc`, `tokio::sync::oneshot`, etc.) or `spawn_blocking` to bridge between contexts. Avoid making everything `async` just to solve coloring issues, as it increases the risk of accidental blocking.
+
+4.  **Choose Runtime Configuration Wisely:**
+    *   Tokio offers `current_thread` (single-threaded) and `multi_thread` runtime flavors.
+    *   **Start with `current_thread`** unless profiling reveals a bottleneck solvable by multiple threads. It's often simpler and can have better performance due to reduced synchronization needs.
+    *   Using `multi_thread` introduces standard multi-threading complexities (shared state, locks, potential deadlocks) on top of async ones.
+
+5.  **Prefer Channels Over Locks for State Sharing:**
+    *   While `tokio::sync::Mutex` exists, heavily relying on locks for sharing state between tasks can lead to complexity and potential deadlocks, especially when locks are held across `.await` points.
+    *   **Solution:** Structure your application using message passing via Tokio's channels (`mpsc`, `broadcast`, `watch`, `oneshot`) where possible. This often leads to clearer data flow and avoids lock contention.
+
+6.  **Isolate Blocking Work:**
+    *   For specific, long-running, or specialized blocking tasks, consider dedicating separate OS threads (managed outside Tokio's `spawn_blocking` pool if necessary). Communicate with these threads using standard library channels (`std::sync::mpsc`) or async-aware channels if bridging back to Tokio tasks. This provides strong isolation.
+
+7.  **Monitor Your Application:**
+    *   Use tools like `tokio-console` or other metrics/tracing libraries (`tracing`, `metrics`) to observe runtime behavior. Monitor task poll times, scheduling delays, and `spawn_blocking` pool usage to identify performance issues or unintended blocking.
+
+## Key Takeaway
+
+Leverage async/Tokio for I/O concurrency but be diligent about preventing blocking operations from starving the async runtime. Structure your application thoughtfully, prefer message passing over excessive locking, and use `spawn_blocking` to isolate synchronous code.

@@ -1,0 +1,30 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# Project Structure and Adding Examples
+
+This repository is organized as a Cargo workspace. The main configuration and dependency management happen in the root [Cargo.toml](mdc:Cargo.toml).
+
+## Workspace Structure
+
+- **Root:** Contains the main [readme.md](mdc:readme.md) and the workspace [Cargo.toml](mdc:Cargo.toml) file.
+- **Example Directories:** Each subdirectory (e.g., [1-api-request](mdc:1-api-request), [7-hello-server](mdc:7-hello-server)) represents a self-contained example or experiment related to asynchronous Rust programming.
+    - These directories follow the naming convention `<id>-<project-name>` for chronological ordering.
+    - Each example directory contains its own `src/main.rs` (or `src/lib.rs` for libraries) and a `Cargo.toml` file.
+    - Dependencies for individual examples should inherit versions from the root `[workspace.dependencies]` table in [Cargo.toml](mdc:Cargo.toml) using `{ workspace = true }`.
+
+## Adding a New Example
+
+1.  **Create Directory:** Create a new directory using the next available ID and a descriptive name:
+    ```bash
+    cargo new --bin <next_id>-<new-project-name> --name <new-project-name>
+    ```
+    (Replace `--bin` with `--lib` if creating a library example).
+2.  **Update Workspace Members:** Add the new directory name to the `members` list in the root [Cargo.toml](mdc:Cargo.toml).
+3.  **Add Code:** Implement your example code within the new directory's `src/` folder.
+4.  **Manage Dependencies:**
+    - If the example needs dependencies already listed in the root `[workspace.dependencies]`, add them to the example's `Cargo.toml` using `{ workspace = true }`.
+    - If new dependencies are required, add them *first* to the `[workspace.dependencies]` table in the root [Cargo.toml](mdc:Cargo.toml) with specific versions, and *then* reference them in the example's `Cargo.toml` using `{ workspace = true }`.
+5.  **Verify:** Run `cargo check --all` and `cargo test --all` from the root directory to ensure everything compiles and tests pass.
