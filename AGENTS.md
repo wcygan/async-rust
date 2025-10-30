@@ -3,6 +3,13 @@
 ## Project Structure & Module Organization
 This workspace gathers a series of numbered example crates (`1-api-request`, `8-basic-counting-future`, etc), each living in its own directory with a dedicated `Cargo.toml`. Source lives under `src/`, typically exposing a `main.rs`; asynchronous helpers are split into lightweight modules when the example grows. Keep new experiments in numeric order and mirror the existing `<id>-<slug>` pattern so `cargo run -p <id>-<slug>` remains predictable. Shared dependencies are declared once in the root `Cargo.toml`.
 
+## Adding New Subprojects
+- Pick the next numeric prefix and descriptive slug (e.g., `9-task-runner`) so directory sorting matches execution order, then scaffold the crate with `cargo new --bin 9-task-runner --name task_runner`.
+- Append the new directory to the `[workspace].members` list in the root `Cargo.toml`; this keeps `cargo check`, `cargo fmt`, and `cargo test` covering the example automatically.
+- Depend on shared crates via the `[workspace.dependencies]` section in the root manifest—add any new versions there first, then reference them from the subproject with `workspace = true` (see `6-async-tail-f/Cargo.toml` for the `tokio`/`clap` pattern).
+- Enable crate-specific features inline when pulling from the workspace (`tokio = { workspace = true, features = ["full"] }`) so each example opts into only what it needs without duplicating version pins.
+- Run `cargo check -p <id>-<slug>` after wiring everything up to confirm the new example compiles before moving on to implementation details.
+
 ## Build, Test, and Development Commands
 - `cargo fmt` — format the entire workspace; run before every commit.
 - `cargo check` — fast validation of compiler errors across all crates.
