@@ -8,6 +8,7 @@ members = [
     "6-async-tail-f",
     "7-hello-server",
     "8-basic-counting-future",
+    "9-local-chat-mesh",
 ]
 resolver = "2"
 
@@ -35,3 +36,4 @@ tower-http = { version = "0.5.2", features = ["trace"] }
 serde = { version = "1.0.219", features = ["derive"] }
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
 tracing = "0.1.41"
+anyhow = "1.0.94"

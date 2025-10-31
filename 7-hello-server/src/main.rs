@@ -1,10 +1,10 @@
 use axum::{
-    routing::{get, post},
     http::StatusCode,
+    routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use tower_http::trace::{TraceLayer, DefaultOnRequest, DefaultOnResponse};
+use tower_http::trace::{DefaultOnRequest, DefaultOnResponse, TraceLayer};
 
 #[tokio::main]
 async fn main() {

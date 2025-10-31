@@ -29,7 +29,8 @@ async fn main() {
         .open(&args.filepath)
         .await
         .expect("Failed to open file");
-    let mut offset = file.seek(SeekFrom::End(0))
+    let mut offset = file
+        .seek(SeekFrom::End(0))
         .await
         .expect("Failed to seek to end");
 
@@ -48,10 +49,7 @@ async fn main() {
 }
 
 async fn read_new_content(file_path: &str, offset: &mut u64) -> Result<String, std::io::Error> {
-    let mut file = OpenOptions::new()
-        .read(true)
-        .open(file_path)
-        .await?;
+    let mut file = OpenOptions::new().read(true).open(file_path).await?;
 
     // Seek to last read offset
     file.seek(SeekFrom::Start(*offset)).await?;
