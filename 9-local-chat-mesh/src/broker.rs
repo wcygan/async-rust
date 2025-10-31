@@ -48,28 +48,11 @@ impl Broker {
         loop {
             select! {
                 _ = &mut shutdown => {
-                    // Tell connected clients why the broker is disappearing so they can exit cleanly.
-                    info!("broker shutting down");
-                    state.broadcast(ServerToClient::Error {
-                        message: "broker shutting down".to_string(),
-                    });
+                    handle_shutdown(&state);
                     break;
                 }
                 accept_result = listener.accept() => {
-                    match accept_result {
-                        Ok((stream, peer)) => {
-                            let state = Arc::clone(&state);
-                            // Spin each connection on its own task so slow clients do not block new accepts.
-                            tokio::spawn(async move {
-                                if let Err(err) = handle_connection(stream, state).await {
-                                    warn!(peer = %peer, error = ?err, "client connection closed with error");
-                                }
-                            });
-                        }
-                        Err(err) => {
-                            warn!(error = ?err, "failed to accept connection");
-                        }
-                    }
+                    handle_accept_result(accept_result, &state);
                 }
             }
         }
@@ -85,6 +68,32 @@ impl Broker {
         })
         .await
     }
+}
+
+fn handle_shutdown(state: &Arc<BrokerState>) {
+    info!("broker shutting down");
+    state.broadcast(ServerToClient::Error {
+        message: "broker shutting down".to_string(),
+    });
+}
+
+fn handle_accept_result(
+    result: std::io::Result<(TcpStream, SocketAddr)>,
+    state: &Arc<BrokerState>,
+) {
+    match result {
+        Ok((stream, peer)) => spawn_client_handler(stream, peer, state),
+        Err(err) => warn!(error = ?err, "failed to accept connection"),
+    }
+}
+
+fn spawn_client_handler(stream: TcpStream, peer: SocketAddr, state: &Arc<BrokerState>) {
+    let state = Arc::clone(state);
+    tokio::spawn(async move {
+        if let Err(err) = handle_connection(stream, state).await {
+            warn!(peer = %peer, error = ?err, "client connection closed with error");
+        }
+    });
 }
 
 struct BrokerState {
@@ -156,65 +165,106 @@ enum RegisterClientError {
 
 async fn handle_connection(stream: TcpStream, state: Arc<BrokerState>) -> Result<()> {
     let peer = stream.peer_addr().ok();
-    let (reader, mut writer) = stream.into_split();
+    let (reader, writer) = stream.into_split();
     let mut reader = BufReader::new(reader);
+    let mut writer = writer;
 
-    let hello = match read_message::<_, ClientToServer>(&mut reader).await? {
+    let nickname = perform_handshake(&mut reader, &mut writer).await?;
+    let client_id = register_and_welcome(&state, &mut writer, &nickname).await?;
+
+    info!(?peer, nickname, "client joined");
+    state.broadcast(ServerToClient::UserJoined {
+        nickname: nickname.clone(),
+    });
+
+    run_client_session(&state, &mut reader, &mut writer, &nickname).await?;
+    cleanup_client_disconnect(&state, client_id, peer).await;
+
+    Ok(())
+}
+
+async fn perform_handshake<R, W>(reader: &mut R, writer: &mut W) -> Result<String>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let hello = match read_message::<_, ClientToServer>(reader).await? {
         Some(message) => message,
-        None => return Ok(()),
+        None => anyhow::bail!("connection closed before handshake"),
     };
 
-    let nickname = match hello {
-        ClientToServer::Hello { nickname } => nickname.trim().to_string(),
-        _ => {
-            write_message(
-                &mut writer,
-                &ServerToClient::Error {
-                    message: "expected hello message first".to_string(),
-                },
-            )
-            .await?;
-            return Ok(());
-        }
-    };
+    let nickname = extract_nickname(hello)?;
+    validate_nickname(&nickname, writer).await?;
 
+    Ok(nickname)
+}
+
+fn extract_nickname(message: ClientToServer) -> Result<String> {
+    match message {
+        ClientToServer::Hello { nickname } => Ok(nickname.trim().to_string()),
+        _ => anyhow::bail!("expected hello message first"),
+    }
+}
+
+async fn validate_nickname<W>(nickname: &str, writer: &mut W) -> Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
     if nickname.is_empty() {
         write_message(
-            &mut writer,
+            writer,
             &ServerToClient::Error {
                 message: "nickname cannot be empty".to_string(),
             },
         )
         .await?;
-        return Ok(());
+        anyhow::bail!("nickname cannot be empty");
     }
+    Ok(())
+}
 
+async fn register_and_welcome<W>(
+    state: &BrokerState,
+    writer: &mut W,
+    nickname: &str,
+) -> Result<ClientId>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
     let client_id = state.next_id();
-    let roster = match state.register_client(client_id, nickname.clone()).await {
+    let roster = match state.register_client(client_id, nickname.to_string()).await {
         Ok(roster) => roster,
         Err(RegisterClientError::NicknameTaken) => {
             write_message(
-                &mut writer,
+                writer,
                 &ServerToClient::Error {
                     message: format!("nickname '{nickname}' is already in use"),
                 },
             )
             .await?;
-            return Ok(());
+            anyhow::bail!("nickname already taken");
         }
     };
 
+    send_welcome_messages(writer, nickname, roster).await?;
+    Ok(client_id)
+}
+
+async fn send_welcome_messages<W>(writer: &mut W, nickname: &str, roster: Vec<String>) -> Result<()>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
     write_message(
-        &mut writer,
+        writer,
         &ServerToClient::Welcome {
-            nickname: nickname.clone(),
+            nickname: nickname.to_string(),
         },
     )
     .await?;
 
     if !roster.is_empty() {
         write_message(
-            &mut writer,
+            writer,
             &ServerToClient::Roster {
                 participants: roster,
             },
@@ -222,73 +272,110 @@ async fn handle_connection(stream: TcpStream, state: Arc<BrokerState>) -> Result
         .await?;
     }
 
-    info!(?peer, nickname, "client joined");
+    Ok(())
+}
 
-    state.broadcast(ServerToClient::UserJoined {
-        nickname: nickname.clone(),
-    });
-
+async fn run_client_session<R, W>(
+    state: &BrokerState,
+    reader: &mut R,
+    writer: &mut W,
+    nickname: &str,
+) -> Result<()>
+where
+    R: tokio::io::AsyncBufRead + Unpin,
+    W: tokio::io::AsyncWrite + Unpin,
+{
     let mut inbox = state.subscribe();
 
     loop {
         select! {
-            client_message = read_message::<_, ClientToServer>(&mut reader) => {
-                match client_message? {
-                    Some(ClientToServer::Chat { text }) => {
-                        // Skip empty lines to avoid spamming blank chat messages.
-                        if text.trim().is_empty() {
-                            continue;
-                        }
-                        state.broadcast(ServerToClient::Chat {
-                            nickname: nickname.clone(),
-                            text,
-                        });
-                    }
-                    Some(ClientToServer::Hello { .. }) => {
-                        write_message(
-                            &mut writer,
-                            &ServerToClient::Error {
-                                message: "already connected".to_string(),
-                            },
-                        )
-                        .await?;
-                    }
-                    None => break,
+            client_message = read_message::<_, ClientToServer>(reader) => {
+                if !handle_client_message(client_message, writer, state, nickname).await? {
+                    break;
                 }
             }
             broadcast_message = inbox.recv() => {
-                match broadcast_message {
-                    Ok(message) => {
-                        // Forward the broadcast; failure means the socket is unhealthy so we drop it.
-                        if let Err(err) = write_message(&mut writer, &message).await {
-                            debug!(?err, "failed to deliver message to client");
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Lagged(skipped)) => {
-                        // Let the client know they fell behind so they can reconnect if desired.
-                        let warning = ServerToClient::Error {
-                            message: format!(
-                                "you are behind by {skipped} messages; consider reconnecting"
-                            ),
-                        };
-                        if let Err(err) = write_message(&mut writer, &warning).await {
-                            debug!(?err, "failed to notify client about lag");
-                            break;
-                        }
-                    }
-                    Err(broadcast::error::RecvError::Closed) => break,
+                if !handle_broadcast_message(broadcast_message, writer).await? {
+                    break;
                 }
             }
         }
     }
 
+    Ok(())
+}
+
+async fn handle_client_message<W>(
+    message: Result<Option<ClientToServer>, std::io::Error>,
+    writer: &mut W,
+    state: &BrokerState,
+    nickname: &str,
+) -> Result<bool>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    match message? {
+        Some(ClientToServer::Chat { text }) => {
+            if !text.trim().is_empty() {
+                state.broadcast(ServerToClient::Chat {
+                    nickname: nickname.to_string(),
+                    text,
+                });
+            }
+            Ok(true)
+        }
+        Some(ClientToServer::Hello { .. }) => {
+            write_message(
+                writer,
+                &ServerToClient::Error {
+                    message: "already connected".to_string(),
+                },
+            )
+            .await?;
+            Ok(true)
+        }
+        None => Ok(false),
+    }
+}
+
+async fn handle_broadcast_message<W>(
+    message: Result<ServerToClient, broadcast::error::RecvError>,
+    writer: &mut W,
+) -> Result<bool>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    match message {
+        Ok(message) => {
+            if let Err(err) = write_message(writer, &message).await {
+                debug!(?err, "failed to deliver message to client");
+                return Ok(false);
+            }
+            Ok(true)
+        }
+        Err(broadcast::error::RecvError::Lagged(skipped)) => {
+            let warning = ServerToClient::Error {
+                message: format!("you are behind by {skipped} messages; consider reconnecting"),
+            };
+            if let Err(err) = write_message(writer, &warning).await {
+                debug!(?err, "failed to notify client about lag");
+                return Ok(false);
+            }
+            Ok(true)
+        }
+        Err(broadcast::error::RecvError::Closed) => Ok(false),
+    }
+}
+
+async fn cleanup_client_disconnect(
+    state: &BrokerState,
+    client_id: ClientId,
+    peer: Option<SocketAddr>,
+) {
     if let Some(ClientRecord { nickname }) = state.remove_client(client_id).await {
         info!(?peer, %nickname, "client disconnected");
         state.broadcast(ServerToClient::UserLeft { nickname });
     }
-
-    Ok(())
 }
 
 #[cfg(test)]
