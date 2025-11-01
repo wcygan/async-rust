@@ -9,6 +9,12 @@ members = [
     "7-hello-server",
     "8-basic-counting-future",
     "9-local-chat-mesh",
+    "10-pinning-in-futures",
+    "11-context-in-futures",
+    "12-cancel-safety",
+    "13-waking-futures-remotely",
+    "14-sharing-data-between-futures",
+    "15-async-logger",
 ]
 resolver = "2"
 
