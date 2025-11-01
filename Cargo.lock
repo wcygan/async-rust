@@ -142,6 +142,9 @@ dependencies = [
 [[package]]
 name = "async_logger"
 version = "0.1.0"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "atomic-waker"
@@ -327,6 +330,9 @@ checksum = "2e93abca9e28e0a1b9877922aacb20576e05d4679ffa78c3d6dc22a26a216659"
 [[package]]
 name = "cancel_safety"
 version = "0.1.0"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "cargo"
@@ -528,6 +534,9 @@ checksum = "c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8"
 [[package]]
 name = "context_in_futures"
 version = "0.1.0"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "core-foundation"
@@ -3393,6 +3402,9 @@ dependencies = [
 [[package]]
 name = "sharing_data_between_futures"
 version = "0.1.0"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "shell-escape"
@@ -4102,6 +4114,9 @@ dependencies = [
 [[package]]
 name = "waking_futures_remotely"
 version = "0.1.0"
+dependencies = [
+ "tokio",
+]
 
 [[package]]
 name = "walkdir"
