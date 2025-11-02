@@ -65,30 +65,7 @@ impl Future for CounterFuture {
     fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         std::thread::sleep(Duration::from_secs(1));
         let mut guard = match self.data_reference.try_lock() {
-            Ok(mut guard) => {
-                let value = &mut *guard;
-
-                match self.counter_type {
-                    CounterType::Increment => {
-                        value.increment();
-                        println!("after increment: {}", value.counter);
-                    }
-                    CounterType::Decrement => {
-                        value.decrement();
-                        println!("after decrement: {}", value.counter);
-                    }
-                }
-
-                drop(guard);
-                self.count += 1;
-
-                if self.count < 3 {
-                    cx.waker().wake_by_ref();
-                    return Poll::Pending;
-                } else {
-                    Poll::Ready(self.count)
-                }
-            }
+            Ok(mut guard) => guard,
             Err(error) => {
                 println!(
                     "Error for {:?}: {}",
@@ -99,7 +76,28 @@ impl Future for CounterFuture {
             }
         };
 
-        todo!()
+        let value = &mut *guard;
+
+        match self.counter_type {
+            CounterType::Increment => {
+                value.increment();
+                println!("after increment: {}", value.counter);
+            }
+            CounterType::Decrement => {
+                value.decrement();
+                println!("after decrement: {}", value.counter);
+            }
+        }
+
+        drop(guard);
+        self.count += 1;
+
+        if self.count < 3 {
+            cx.waker().wake_by_ref();
+            return Poll::Pending;
+        } else {
+            Poll::Ready(self.count)
+        }
     }
 }
 
