@@ -16,6 +16,21 @@ use tokio::task;
 /// hold on the polling of the future by externally
 /// referencing the future's waker and waking the
 /// future when we need to.
+///
+/// Runn the program yields the following output:
+///
+///    Polling the future
+///    spawning trigger task
+///    Polling the future
+///    Future completed with: ()
+///
+/// Polling only happense once on the initial setup
+/// and then happens one more time when we wake the future
+/// with the data. Async runtimes set up
+/// efficient ways to listen to OS events so they do
+/// not have to blindly poll futures. For instance, Tokio
+/// has an event loop that listens to OS events and then
+/// handles them so the event wakes up the right task.
 
 struct MyFuture {
     state: Arc<Mutex<MyFutureState>>,
