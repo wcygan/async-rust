@@ -67,10 +67,7 @@ impl Future for CounterFuture {
         let mut guard = match self.data_reference.try_lock() {
             Ok(mut guard) => guard,
             Err(error) => {
-                println!(
-                    "Error for {:?}: {}",
-                    self.counter_type, error
-                );
+                println!("Error for {:?}: {}", self.counter_type, error);
                 cx.waker().wake_by_ref();
                 return Poll::Pending;
             }
@@ -140,4 +137,59 @@ async fn main() {
     }
 
     println!("Finished!");
+
+    println!("Trying now the async function version:");
+    let shared_data_async = Arc::new(tokio::sync::Mutex::new(SharedData { counter: 0 }));
+    let shared_data_async2 = shared_data_async.clone();
+
+    let increment_handle_async = tokio::spawn(async move {
+        let result = count(3, shared_data_async, CounterType::Increment).await;
+        println!("Async Increment future completed with count: {}", result);
+    });
+
+    let decrement_handle_async = tokio::spawn(async move {
+        let result = count(3, shared_data_async2, CounterType::Decrement).await;
+        println!("Async Decrement future completed with count: {}", result);
+    });
+
+    let (r1_async, r2_async) = tokio::join!(increment_handle_async, decrement_handle_async);
+    match r1_async {
+        Ok(_) => println!("Async Increment task finished successfully."),
+        Err(e) => println!("Async Increment task failed: {}", e),
+    }
+    match r2_async {
+        Ok(_) => println!("Async Decrement task finished successfully."),
+        Err(e) => println!("Async Decrement task failed: {}", e),
+    }
+    println!("Finished async function version!");
+}
+
+/// This method is functionally equivalent to the CounterFuture
+/// struct and its Future implementation above. However, it uses
+/// an async function instead of implementing the Future trait manually.
+#[allow(dead_code)]
+async fn count(
+    count: u32,
+    data: Arc<tokio::sync::Mutex<SharedData>>,
+    counter_type: CounterType,
+) -> u32 {
+    for _ in 0..count {
+        let mut guard = data.lock().await;
+        match counter_type {
+            CounterType::Increment => {
+                println!("Incrementing counter");
+                guard.increment();
+                println!("Current counter value: {}", guard.counter);
+            }
+            CounterType::Decrement => {
+                println!("Decrementing counter");
+                guard.decrement();
+                println!("Current counter value: {}", guard.counter);
+            }
+        }
+        drop(guard);
+        std::thread::sleep(Duration::from_secs(1));
+    }
+
+    count
 }
