@@ -1,5 +1,7 @@
 use std::fs::{File, OpenOptions};
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use tokio::task::JoinHandle;
 
 /// This program will use ideas from the past few programs
@@ -47,6 +49,19 @@ fn get_file_handle(file_path: &dyn ToString) -> AsyncFileHandle {
                 .expect("Failed to create log file");
             Arc::new(Mutex::new(created_file))
         }
+    }
+}
+
+struct AsyncWriteFuture {
+    pub handle: AsyncFileHandle,
+    pub entry: String,
+}
+
+impl Future for AsyncWriteFuture {
+    type Output = Result<bool, String>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        todo!()
     }
 }
 
