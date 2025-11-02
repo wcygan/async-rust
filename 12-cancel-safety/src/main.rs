@@ -9,7 +9,18 @@ use tokio::time::{sleep, Duration};
 /// a certain amount of time, we must be careful about the notion
 /// of "Cancel Safety".
 /// 
-/// Cancel Safety ensures that when a future is cancled 
+/// Cancel Safety ensures that when a future is canceled, any
+/// state or resources it was using are handled correctly.
+/// If a task is in the middle of an operation when it's
+/// canceled, it shouldn't leave the system in a bad state,
+/// like holding onto locks, leaving files open,
+/// or partially modifying data.
+/// 
+/// In Rust's async ecosystem, most operations are cancel-safe by default;
+/// they can be safely interrupted without causing issues. However,
+/// it's still a good practice to be aware of how your tasks interact
+/// with external resources or state and ensure that those interactions
+/// are cancel safe
 #[tokio::main]
 async fn main() {
     let shared = Arc::new(Mutex::new(0u32));
