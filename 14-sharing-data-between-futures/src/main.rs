@@ -94,7 +94,7 @@ impl Future for CounterFuture {
 
         if self.count < 3 {
             cx.waker().wake_by_ref();
-            return Poll::Pending;
+            Poll::Pending
         } else {
             Poll::Ready(self.count)
         }
@@ -103,5 +103,41 @@ impl Future for CounterFuture {
 
 #[tokio::main]
 async fn main() {
-    println!("Hello, world!");
+    let shared_data = Arc::new(Mutex::new(SharedData { counter: 0 }));
+
+    let increment_future = CounterFuture {
+        counter_type: CounterType::Increment,
+        data_reference: Arc::clone(&shared_data),
+        count: 0,
+    };
+
+    let decrement_future = CounterFuture {
+        counter_type: CounterType::Decrement,
+        data_reference: Arc::clone(&shared_data),
+        count: 0,
+    };
+
+    let increment_handle = tokio::spawn(async move {
+        let result = increment_future.await;
+        println!("Increment future completed with count: {}", result);
+    });
+
+    let decrement_handle = tokio::spawn(async move {
+        let result = decrement_future.await;
+        println!("Decrement future completed with count: {}", result);
+    });
+
+    let (r1, r2) = tokio::join!(increment_handle, decrement_handle);
+
+    match r1 {
+        Ok(_) => println!("Increment task finished successfully."),
+        Err(e) => println!("Increment task failed: {}", e),
+    }
+
+    match r2 {
+        Ok(_) => println!("Decrement task finished successfully."),
+        Err(e) => println!("Decrement task failed: {}", e),
+    }
+
+    println!("Finished!");
 }
