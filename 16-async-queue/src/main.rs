@@ -1,4 +1,5 @@
 use async_task::{Runnable, Task};
+use std::panic::catch_unwind;
 use std::sync::LazyLock;
 
 fn main() {
@@ -32,17 +33,40 @@ where
     F: Future<Output=T> + Send + 'static,
     T: Send + 'static,
 {
-    todo!()
+    let schedule = |runnable: Runnable| {
+        QUEUE.send(runnable).expect("Failed to send runnable to the queue");
+    };
+
+    let (runnable, task) = async_task::spawn(
+        future, schedule,
+    );
+
+    runnable.schedule();
+    println!(
+        "Here is the queue count: {}",
+        QUEUE.len()
+    );
+
+    task
 }
 
+/// `Runnable` is a handle for a runnable task. Every spawned task has a single Runnable
+/// handle, which exists only when the task is scheduled to run. The handle has the `run`
+/// function that polls that task's future once. Then the runnable is dropped. The
+/// runnable appears again only when the waker wakes the task in turn, scheduling the task
+/// again.
 static QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
     let (sender, receiver) = flume::unbounded::<Runnable>();
 
     // Spawn a worker thread to process the task queue
     std::thread::spawn(move || {
         while let Ok(runnable) = receiver.recv() {
+            println!(
+                "Worker thread: {:?} executing a task",
+                std::thread::current().id()
+            );
             // Execute the task
-            runnable.run();
+            let _ = catch_unwind(|| runnable.run());
         }
     });
 
