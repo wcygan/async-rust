@@ -1,4 +1,6 @@
+use futures_util::future::join_all;
 use std::fs::{File, OpenOptions};
+use std::io::prelude::*;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -61,11 +63,61 @@ impl Future for AsyncWriteFuture {
     type Output = Result<bool, String>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        todo!()
+        let mut guard = match self.handle.try_lock() {
+            Ok(guard) => { guard }
+            Err(error) => {
+                println!(
+                    "Error for {}: {}", self.entry, error
+                );
+                cx.waker().wake_by_ref();
+                return Poll::Pending;
+            }
+        };
+
+        let lined_entry = format!("{}\n", self.entry);
+        match guard.write_all(lined_entry.as_bytes()) {
+            Ok(_) => {
+                println!("Written for {}", self.entry);
+            }
+            Err(error) => {
+                println!("{}", error)
+            }
+        }
+
+        Poll::Ready(Ok(true))
     }
+}
+
+fn write_log(file_handle: AsyncFileHandle, line: String) -> FileJoinHandle {
+    let future = AsyncWriteFuture {
+        handle: file_handle,
+        entry: line,
+    };
+
+    tokio::task::spawn(async move {
+        future.await
+    })
 }
 
 #[tokio::main]
 async fn main() {
-    println!("Hello, world!");
+    let login_handle = get_file_handle(&"login_audit.log");
+    let error_handle = get_file_handle(&"error_audit.log");
+
+    let names = vec!["Alice", "Bob", "Charlie", "Diana"];
+    let mut join_handles: Vec<FileJoinHandle> = Vec::new();
+
+    for name in names {
+        let login_entry = format!("User {} logged in", name);
+        let login_handle_clone = Arc::clone(&login_handle);
+        let login_join_handle = write_log(login_handle_clone, login_entry);
+        join_handles.push(login_join_handle);
+
+        let error_entry = format!("Error encountered for user {}", name);
+        let error_handle_clone = Arc::clone(&error_handle);
+        let error_join_handle = write_log(error_handle_clone, error_entry);
+        join_handles.push(error_join_handle);
+    }
+
+    let _ = join_all(join_handles).await;
 }
