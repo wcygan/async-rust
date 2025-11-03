@@ -99,6 +99,29 @@ fn write_log(file_handle: AsyncFileHandle, line: String) -> FileJoinHandle {
     })
 }
 
+/// Ensuring Ordering in Asynchronous Operations
+///
+/// Obtaining a lock is not deterministic, so we cannot assume the
+/// order in which the log is written. Locks are not just the only
+/// cause of this disorder. Delays in the response of any async operation
+/// can result in a disordered result, because when we are awaiting on
+/// one result, we process another. Therefore, when reaching for async
+/// solutions, we cannot rely on the results being processed in a certain
+/// order.
+///
+/// If the order is essential, then keeping to one future and using data
+/// collections like queues will slow down the completion of all steps but
+/// will ensure that the steps are processed in the order you need them
+/// to be. In this case, if we needed to write to the file in order,
+/// we could wrap a queue in a Mutex and give one future the responsibility
+/// of checking the queue on every poll. Another future could then add
+/// to that queue.
+///
+/// Increasing the number of futures with access to the queue on either side
+/// will compromise the assumption of order. While restricting the number of
+/// futures accessing the queue to one on each side reduces speed, we will
+/// still benefit if there are I/O delays. This is because the waiting of log
+/// inputs will not block our thread.
 #[tokio::main]
 async fn main() {
     let login_handle = get_file_handle(&"login_audit.log");
