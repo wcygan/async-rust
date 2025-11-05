@@ -35,7 +35,22 @@ macro_rules! join {
     };
 }
 
+macro_rules! try_join {
+    ($($future:expr),*) => {{
+        let mut results = Vec::new();
+
+        $(
+            let result = catch_unwind(|| futures_lite::future::block_on($future));
+            results.push(result);
+        )*
+
+        results
+    }};
+}
+
 fn main() {
+    Runtime::new().run();
+
     let one = CounterFuture {
         count: 0,
         order: FuturePriority::High,
@@ -51,6 +66,41 @@ fn main() {
     let outcome_two: Vec<()> = join!(t_tree);
     println!("Outcome one: {:?}", outcome);
     println!("Outcome two: {:?}", outcome_two);
+}
+
+struct Runtime {
+    /// Number of threads for the high priority queue
+    high_num: usize,
+    /// Number of threads for the low priority queue
+    low_num: usize,
+}
+
+impl Runtime {
+    fn new() -> Self {
+        let num_cores = std::thread::available_parallelism().unwrap().get();
+        Self { high_num: num_cores, low_num: 1 }
+    }
+
+    pub fn with_high_priority_threads(mut self, num: usize) -> Self {
+        self.high_num = num;
+        self
+    }
+
+    pub fn with_low_priority_threads(mut self, num: usize) -> Self {
+        self.low_num = num;
+        self
+    }
+
+    pub fn run(&self) {
+        unsafe {
+            std::env::set_var("HIGH_PRIORITY_THREADS", self.high_num.to_string());
+            std::env::set_var("LOW_PRIORITY_THREADS", self.low_num.to_string());
+        }
+
+        let high = spawn_task!(async { }, FuturePriority::High);
+        let low = spawn_task!(async { }, FuturePriority::Low);
+        join!(high, low);
+    }
 }
 
 /// `spawn_task` is a generic function that accepts any types
@@ -127,7 +177,11 @@ static QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
 static HIGH_PRIORITY_QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
     let (sender, receiver) = flume::unbounded::<Runnable>();
 
-    for _ in 0..2 {
+    let high_thread_count: usize = std::env::var("HIGH_PRIORITY_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(2);
+    for _ in 0..high_thread_count {
         let high_receiver = HIGH_CHANNEL.clone();
         let low_receiver = LOW_CHANNEL.clone();
         std::thread::spawn(move || {
@@ -158,7 +212,11 @@ static HIGH_PRIORITY_QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(||
 static LOW_PRIORITY_QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
     let (sender, receiver) = flume::unbounded::<Runnable>();
 
-    for _ in 0..2 {
+    let low_thread_count: usize = std::env::var("LOW_PRIORITY_THREADS")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(1);
+    for _ in 0..low_thread_count {
         let high_receiver = HIGH_CHANNEL.clone();
         let low_receiver = LOW_CHANNEL.clone();
         std::thread::spawn(move || {
