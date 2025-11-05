@@ -1,4 +1,5 @@
 use async_task::{Runnable, Task};
+use flume::{Receiver, Sender};
 use std::panic::catch_unwind;
 use std::pin::Pin;
 use std::sync::LazyLock;
@@ -87,33 +88,72 @@ static QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
 static HIGH_PRIORITY_QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
     let (sender, receiver) = flume::unbounded::<Runnable>();
 
-    let thread_count = 2;
-    for _ in 0..thread_count {
-        let queue = receiver.clone();
+    for _ in 0..2 {
+        let high_receiver = HIGH_CHANNEL.clone();
+        let low_receiver = LOW_CHANNEL.clone();
         std::thread::spawn(move || {
-            while let Ok(runnable) = queue.recv() {
-                let _ = catch_unwind(|| runnable.run());
+            loop {
+                match high_receiver.1.try_recv() {
+                    Ok(runnable) => {
+                        let _ = catch_unwind(|| runnable.run());
+                    }
+                    Err(_) => {
+                        // Task stealing when there is no high priority task
+                        match low_receiver.1.try_recv() {
+                            Ok(runnable) => {
+                                let _ = catch_unwind(|| runnable.run());
+                            }
+                            Err(_) => {
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
+                        }
+                    }
+                }
             }
         });
     }
 
-    sender
+
+    HIGH_CHANNEL.0.clone()
 });
 
 static LOW_PRIORITY_QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
     let (sender, receiver) = flume::unbounded::<Runnable>();
 
-    let thread_count = 2;
-    for _ in 0..thread_count {
-        let queue = receiver.clone();
+    for _ in 0..2 {
+        let high_receiver = HIGH_CHANNEL.clone();
+        let low_receiver = LOW_CHANNEL.clone();
         std::thread::spawn(move || {
-            while let Ok(runnable) = queue.recv() {
-                let _ = catch_unwind(|| runnable.run());
+            loop {
+                match low_receiver.1.recv() {
+                    Ok(runnable) => {
+                        let _ = catch_unwind(|| runnable.run());
+                    }
+                    Err(_) => {
+                        // Task stealing when there is no low priority task
+                        match high_receiver.1.try_recv() {
+                            Ok(runnable) => {
+                                let _ = catch_unwind(|| runnable.run());
+                            }
+                            Err(_) => {
+                                std::thread::sleep(std::time::Duration::from_millis(100));
+                            }
+                        }
+                    }
+                }
             }
         });
     }
 
-    sender
+    LOW_CHANNEL.0.clone()
+});
+
+static HIGH_CHANNEL: LazyLock<(Sender<Runnable>, Receiver<Runnable>)> = LazyLock::new(|| {
+    flume::unbounded::<Runnable>()
+});
+
+static LOW_CHANNEL: LazyLock<(Sender<Runnable>, Receiver<Runnable>)> = LazyLock::new(|| {
+    flume::unbounded::<Runnable>()
 });
 
 struct CounterFuture {
