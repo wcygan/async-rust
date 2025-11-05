@@ -16,6 +16,7 @@ members = [
     "14-sharing-data-between-futures",
     "15-async-logger",
     "16-async-queue",
+    "17-background-process",
 ]
 resolver = "2"
 
