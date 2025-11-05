@@ -9,11 +9,28 @@ use std::task::{Context, Poll};
 /// If no priority is provided, it defaults to `FuturePriority::Low`.
 macro_rules! spawn_task {
     ($future:expr) => {
+        // Spawn with default low priority
         spawn_task!($future, FuturePriority::Low)
     };
     ($future:expr, $order:expr) => {
+        // Spawn with specified priority
         spawn_task($future, $order)
     }
+}
+
+macro_rules! join {
+    ($($future:expr),*) => {
+        // Create a vector to hold the results
+        let mut results = Vec::new();
+
+        // For each future, block on its completion and collect the results
+        $(
+            results.push(futures_lite::future::block_on($future));
+        )*
+
+        // Return the collected results
+        results
+    };
 }
 
 fn main() {
@@ -21,6 +38,10 @@ fn main() {
     let two = CounterFuture { count: 0, order: FuturePriority::Low };
     let t_one = spawn_task!(one);
     let t_two = spawn_task(two, FuturePriority::High);
+    let t_tree = spawn_task!(async_fn());
+    let outcome: Vec<u32> = join!(t_one, t_two);
+    let outcome_two: Vec<()> = join!(t_tree);
+
     std::thread::sleep(std::time::Duration::from_secs(5));
     println!("Before the blocking wait");
     futures_lite::future::block_on(t_one);
