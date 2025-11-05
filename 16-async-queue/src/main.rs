@@ -15,11 +15,12 @@ macro_rules! spawn_task {
     ($future:expr, $order:expr) => {
         // Spawn with specified priority
         spawn_task($future, $order)
-    }
+    };
 }
 
 macro_rules! join {
     ($($future:expr),*) => {
+      {
         // Create a vector to hold the results
         let mut results = Vec::new();
 
@@ -30,22 +31,26 @@ macro_rules! join {
 
         // Return the collected results
         results
+      }
     };
 }
 
 fn main() {
-    let one = CounterFuture { count: 0, order: FuturePriority::High };
-    let two = CounterFuture { count: 0, order: FuturePriority::Low };
+    let one = CounterFuture {
+        count: 0,
+        order: FuturePriority::High,
+    };
+    let two = CounterFuture {
+        count: 0,
+        order: FuturePriority::Low,
+    };
     let t_one = spawn_task!(one);
     let t_two = spawn_task(two, FuturePriority::High);
     let t_tree = spawn_task!(async_fn());
     let outcome: Vec<u32> = join!(t_one, t_two);
     let outcome_two: Vec<()> = join!(t_tree);
-
-    std::thread::sleep(std::time::Duration::from_secs(5));
-    println!("Before the blocking wait");
-    futures_lite::future::block_on(t_one);
-    futures_lite::future::block_on(t_two);
+    println!("Outcome one: {:?}", outcome);
+    println!("Outcome two: {:?}", outcome_two);
 }
 
 /// `spawn_task` is a generic function that accepts any types
@@ -76,11 +81,15 @@ where
     T: Send + 'static,
 {
     let schedule_high_priority = |runnable: Runnable| {
-        HIGH_PRIORITY_QUEUE.send(runnable).expect("Failed to send runnable to the high priority queue");
+        HIGH_PRIORITY_QUEUE
+            .send(runnable)
+            .expect("Failed to send runnable to the high priority queue");
     };
 
     let schedule_low_priority = |runnable: Runnable| {
-        LOW_PRIORITY_QUEUE.send(runnable).expect("Failed to send runnable to the low priority queue");
+        LOW_PRIORITY_QUEUE
+            .send(runnable)
+            .expect("Failed to send runnable to the low priority queue");
     };
 
     let schedule = match order {
@@ -88,9 +97,7 @@ where
         FuturePriority::Low => schedule_low_priority,
     };
 
-    let (runnable, task) = async_task::spawn(
-        future, schedule,
-    );
+    let (runnable, task) = async_task::spawn(future, schedule);
 
     runnable.schedule();
     task
@@ -145,7 +152,6 @@ static HIGH_PRIORITY_QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(||
         });
     }
 
-
     HIGH_CHANNEL.0.clone()
 });
 
@@ -180,13 +186,11 @@ static LOW_PRIORITY_QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| 
     LOW_CHANNEL.0.clone()
 });
 
-static HIGH_CHANNEL: LazyLock<(Sender<Runnable>, Receiver<Runnable>)> = LazyLock::new(|| {
-    flume::unbounded::<Runnable>()
-});
+static HIGH_CHANNEL: LazyLock<(Sender<Runnable>, Receiver<Runnable>)> =
+    LazyLock::new(|| flume::unbounded::<Runnable>());
 
-static LOW_CHANNEL: LazyLock<(Sender<Runnable>, Receiver<Runnable>)> = LazyLock::new(|| {
-    flume::unbounded::<Runnable>()
-});
+static LOW_CHANNEL: LazyLock<(Sender<Runnable>, Receiver<Runnable>)> =
+    LazyLock::new(|| flume::unbounded::<Runnable>());
 
 struct CounterFuture {
     count: u32,
@@ -272,4 +276,3 @@ enum FuturePriority {
 trait PrioritizedFuture: Future {
     fn priority(&self) -> FuturePriority;
 }
-
