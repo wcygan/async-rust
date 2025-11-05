@@ -5,11 +5,22 @@ use std::pin::Pin;
 use std::sync::LazyLock;
 use std::task::{Context, Poll};
 
+/// A macro to simplify spawning tasks with an optional priority argument.
+/// If no priority is provided, it defaults to `FuturePriority::Low`.
+macro_rules! spawn_task {
+    ($future:expr) => {
+        spawn_task!($future, FuturePriority::Low)
+    };
+    ($future:expr, $order:expr) => {
+        spawn_task($future, $order)
+    }
+}
+
 fn main() {
     let one = CounterFuture { count: 0, order: FuturePriority::High };
     let two = CounterFuture { count: 0, order: FuturePriority::Low };
-    let t_one = spawn_task(one);
-    let t_two = spawn_task(two);
+    let t_one = spawn_task!(one);
+    let t_two = spawn_task(two, FuturePriority::High);
     std::thread::sleep(std::time::Duration::from_secs(5));
     println!("Before the blocking wait");
     futures_lite::future::block_on(t_one);
@@ -38,9 +49,9 @@ fn main() {
 /// Using `async move`, this is where we move the ownership of
 /// variables used in the async closure to the task so we can
 /// ensure that the lifetime is `'static`.
-fn spawn_task<F, T>(future: F) -> Task<T>
+fn spawn_task<F, T>(future: F, order: FuturePriority) -> Task<T>
 where
-    F: Future<Output=T> + Send + 'static + PrioritizedFuture,
+    F: Future<Output=T> + Send + 'static,
     T: Send + 'static,
 {
     let schedule_high_priority = |runnable: Runnable| {
@@ -51,7 +62,7 @@ where
         LOW_PRIORITY_QUEUE.send(runnable).expect("Failed to send runnable to the low priority queue");
     };
 
-    let schedule = match future.priority() {
+    let schedule = match order {
         FuturePriority::High => schedule_high_priority,
         FuturePriority::Low => schedule_low_priority,
     };
