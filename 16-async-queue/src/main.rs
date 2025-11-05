@@ -5,21 +5,14 @@ use std::sync::LazyLock;
 use std::task::{Context, Poll};
 
 fn main() {
-    let one = CounterFuture { count: 0 };
-    let two = CounterFuture { count: 0 };
+    let one = CounterFuture { count: 0, order: FuturePriority::High };
+    let two = CounterFuture { count: 0, order: FuturePriority::Low };
     let t_one = spawn_task(one);
     let t_two = spawn_task(two);
-    let t_three = spawn_task(async {
-        async_fn().await;
-        async_fn().await;
-        async_fn().await;
-        async_fn().await;
-    });
     std::thread::sleep(std::time::Duration::from_secs(5));
     println!("Before the blocking wait");
     futures_lite::future::block_on(t_one);
     futures_lite::future::block_on(t_two);
-    futures_lite::future::block_on(t_three);
 }
 
 /// `spawn_task` is a generic function that accepts any types
@@ -46,11 +39,20 @@ fn main() {
 /// ensure that the lifetime is `'static`.
 fn spawn_task<F, T>(future: F) -> Task<T>
 where
-    F: Future<Output=T> + Send + 'static,
+    F: Future<Output=T> + Send + 'static + PrioritizedFuture,
     T: Send + 'static,
 {
-    let schedule = |runnable: Runnable| {
-        QUEUE.send(runnable).expect("Failed to send runnable to the queue");
+    let schedule_high_priority = |runnable: Runnable| {
+        HIGH_PRIORITY_QUEUE.send(runnable).expect("Failed to send runnable to the high priority queue");
+    };
+
+    let schedule_low_priority = |runnable: Runnable| {
+        LOW_PRIORITY_QUEUE.send(runnable).expect("Failed to send runnable to the low priority queue");
+    };
+
+    let schedule = match future.priority() {
+        FuturePriority::High => schedule_high_priority,
+        FuturePriority::Low => schedule_low_priority,
     };
 
     let (runnable, task) = async_task::spawn(
@@ -58,11 +60,6 @@ where
     );
 
     runnable.schedule();
-    println!(
-        "Here is the queue count: {}",
-        QUEUE.len()
-    );
-
     task
 }
 
@@ -87,8 +84,47 @@ static QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
     sender
 });
 
+static HIGH_PRIORITY_QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
+    let (sender, receiver) = flume::unbounded::<Runnable>();
+
+    let thread_count = 2;
+    for _ in 0..thread_count {
+        let queue = receiver.clone();
+        std::thread::spawn(move || {
+            while let Ok(runnable) = queue.recv() {
+                let _ = catch_unwind(|| runnable.run());
+            }
+        });
+    }
+
+    sender
+});
+
+static LOW_PRIORITY_QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
+    let (sender, receiver) = flume::unbounded::<Runnable>();
+
+    let thread_count = 2;
+    for _ in 0..thread_count {
+        let queue = receiver.clone();
+        std::thread::spawn(move || {
+            while let Ok(runnable) = queue.recv() {
+                let _ = catch_unwind(|| runnable.run());
+            }
+        });
+    }
+
+    sender
+});
+
 struct CounterFuture {
     count: u32,
+    order: FuturePriority,
+}
+
+impl PrioritizedFuture for CounterFuture {
+    fn priority(&self) -> FuturePriority {
+        self.order
+    }
 }
 
 /// Example 1
@@ -110,7 +146,7 @@ impl Future for CounterFuture {
     }
 }
 
-/// Example 2
+/// Example 2 (unused after adding PrioritizedFuture)
 /// An asynchronous function that simulates a delay using thread sleep.
 /// Thread sleep (blocking) is used explicitly here for demonstration purposes.
 async fn async_fn() {
@@ -132,6 +168,12 @@ impl AsyncSleep {
     }
 }
 
+impl PrioritizedFuture for AsyncSleep {
+    fn priority(&self) -> FuturePriority {
+        FuturePriority::Low
+    }
+}
+
 /// Example 3
 /// A future that demonstrates asynchronous sleep by checking elapsed time.
 /// It returns Poll::Pending until the specified duration has passed.
@@ -148,3 +190,14 @@ impl Future for AsyncSleep {
         }
     }
 }
+
+#[derive(Debug, Clone, Copy)]
+enum FuturePriority {
+    High,
+    Low,
+}
+
+trait PrioritizedFuture: Future {
+    fn priority(&self) -> FuturePriority;
+}
+
