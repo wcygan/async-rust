@@ -1,5 +1,6 @@
 use async_task::{Runnable, Task};
 use flume::{Receiver, Sender};
+use http::{header, Request, Uri};
 use std::panic::catch_unwind;
 use std::pin::Pin;
 use std::sync::LazyLock;
@@ -48,24 +49,38 @@ macro_rules! try_join {
     }};
 }
 
+/// Chapter 4:
+/// An executor is responsible for running futures to completion.
+/// It is the part of the runtime that schedules tasks and makes sure they run (or are executed)
+/// when they are ready. We need an executor to introduce networking into our runtime because
+/// without it, our futures such as HTTP requests would be created but never actually run.
+///
+/// A connector in networking is a component that establishes a connection between our application
+/// and the server we want to connect to. It handles activities like opening TCP connections
+/// and maintaining them through the lifetime of the request.
 fn main() {
     Runtime::new().run();
 
-    let one = CounterFuture {
-        count: 0,
-        order: FuturePriority::High,
+    // demo_one();
+
+    let url = "http://rust-lang.org";
+    let uri: Uri = url.parse().unwrap();
+
+    let request = Request::builder()
+        .method("GET")
+        .uri(uri)
+        .header(header::USER_AGENT, "hyper.0.14.2")
+        .header(header::ACCEPT, "text/html")
+        .body(hyper::Body::empty()).unwrap();
+
+    let future = async {
+        let client = hyper::Client::new();
+        client.request(request).await.unwrap()
     };
-    let two = CounterFuture {
-        count: 0,
-        order: FuturePriority::Low,
-    };
-    let t_one = spawn_task!(one);
-    let t_two = spawn_task(two, FuturePriority::High);
-    let t_tree = spawn_task!(async_fn());
-    let outcome: Vec<u32> = join!(t_one, t_two);
-    let outcome_two: Vec<()> = join!(t_tree);
-    println!("Outcome one: {:?}", outcome);
-    println!("Outcome two: {:?}", outcome_two);
+
+    let test = spawn_task!(future);
+    let resp = futures_lite::future::block_on(test);
+    println!("Response: {:?}", resp);
 }
 
 struct Runtime {
@@ -333,4 +348,23 @@ enum FuturePriority {
 
 trait PrioritizedFuture: Future {
     fn priority(&self) -> FuturePriority;
+}
+
+
+fn demo_one() {
+    let one = CounterFuture {
+        count: 0,
+        order: FuturePriority::High,
+    };
+    let two = CounterFuture {
+        count: 0,
+        order: FuturePriority::Low,
+    };
+    let t_one = spawn_task!(one);
+    let t_two = spawn_task(two, FuturePriority::High);
+    let t_tree = spawn_task!(async_fn());
+    let outcome: Vec<u32> = join!(t_one, t_two);
+    let outcome_two: Vec<()> = join!(t_tree);
+    println!("Outcome one: {:?}", outcome);
+    println!("Outcome two: {:?}", outcome_two);
 }
