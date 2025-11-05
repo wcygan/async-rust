@@ -83,6 +83,21 @@ fn main() {
     println!("Response: {:?}", resp);
 }
 
+struct CustomExectutor {}
+
+/// This code defines our custom executor and the behavior of the execute function.
+/// Inside this function, we call `spawn_task!` to spawn the future onto our custom task queues.
+/// We call `detach` to avoid closing the channel due to the task being dropped.
+///
+impl<F: Future + Send + 'static> hyper::rt::Executor<F> for CustomExectutor {
+    fn execute(&self, fut: F) {
+        spawn_task!(async {
+            println!("Executing");
+            fut.await;
+        }).detach();
+    }
+}
+
 struct Runtime {
     /// Number of threads for the high priority queue
     high_num: usize,
