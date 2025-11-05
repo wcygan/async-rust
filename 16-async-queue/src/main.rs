@@ -74,17 +74,15 @@ where
 static QUEUE: LazyLock<flume::Sender<Runnable>> = LazyLock::new(|| {
     let (sender, receiver) = flume::unbounded::<Runnable>();
 
-    // Spawn a worker thread to process the task queue
-    std::thread::spawn(move || {
-        while let Ok(runnable) = receiver.recv() {
-            println!(
-                "Worker thread: {:?} executing a task",
-                std::thread::current().id()
-            );
-            // Execute the task
-            let _ = catch_unwind(|| runnable.run());
-        }
-    });
+    let thread_count = 4;
+    for _ in 0..thread_count {
+        let queue = receiver.clone();
+        std::thread::spawn(move || {
+            while let Ok(runnable) = queue.recv() {
+                let _ = catch_unwind(|| runnable.run());
+            }
+        });
+    }
 
     sender
 });
