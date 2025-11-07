@@ -2,6 +2,7 @@ use anyhow::{bail, Context, Error};
 use async_native_tls::TlsStream;
 use async_task::{Runnable, Task};
 use flume::{Receiver, Sender};
+use futures_lite::AsyncRead;
 use http::{header, Request, Uri};
 use smol::Async;
 use std::net::{TcpStream, ToSocketAddrs};
@@ -9,6 +10,7 @@ use std::panic::catch_unwind;
 use std::pin::Pin;
 use std::sync::LazyLock;
 use std::task::Poll;
+use tokio::io::ReadBuf;
 
 /// A macro to simplify spawning tasks with an optional priority argument.
 /// If no priority is provided, it defaults to `FuturePriority::Low`.
@@ -75,7 +77,8 @@ fn main() {
         .uri(uri)
         .header(header::USER_AGENT, "hyper.0.14.2")
         .header(header::ACCEPT, "text/html")
-        .body(hyper::Body::empty()).unwrap();
+        .body(hyper::Body::empty())
+        .unwrap();
 
     let future = async {
         let client = hyper::Client::new();
@@ -98,13 +101,48 @@ impl<F: Future + Send + 'static> hyper::rt::Executor<F> for CustomExectutor {
         spawn_task!(async {
             println!("Executing");
             fut.await;
-        }).detach();
+        })
+            .detach();
     }
 }
 
 enum CustomStream {
     Plain(Async<TcpStream>),
     Tls(TlsStream<Async<TcpStream>>),
+}
+
+/// The AsyncRead trait is similar to the std::io::Read trait but integrates with asynchronous
+/// task systems. When implementing AsyncRead, we have to define only the poll_read method,
+/// which returns a Poll as a result. If we return Poll::Ready, we are saying that the data was
+/// immediately read and placed into the output buffer. If we return Poll:Pending, we are
+/// saying that no data was read into the buffer that we provided. We are also saying that
+/// the I/O object is not currently readable but may become readable in the future. The return
+/// of Pending results in the current future's task being scheduled to be unpark when the
+/// object is readable. The final Poll enum variant that we can return is Poll::Ready but with
+/// an error that would usually be a standard I/O error.
+impl tokio::io::AsyncRead for CustomStream {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        match &mut *self {
+            CustomStream::Plain(s) => {
+                Pin::new(s)
+                    .poll_read(cx, buf.initialize_unfilled())
+                    .map_ok(|size| {
+                        buf.advance(size);
+                    })
+            }
+            CustomStream::Tls(s) => {
+                Pin::new(s)
+                    .poll_read(cx, buf.initialize_unfilled())
+                    .map_ok(|size| {
+                        buf.advance(size);
+                    })
+            }
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -128,9 +166,10 @@ impl hyper::service::Service<Uri> for CustomConnector {
                     let port = req.port_u16().unwrap_or(80);
                     let socket_addr = {
                         let host = host.to_string();
-                        smol::unblock(move || {
-                            (host.as_str(), port).to_socket_addrs()
-                        }).await?.next().context("cannot resolve host")?
+                        smol::unblock(move || (host.as_str(), port).to_socket_addrs())
+                            .await?
+                            .next()
+                            .context("cannot resolve host")?
                     };
                     let stream = Async::<TcpStream>::connect(socket_addr).await?;
                     Ok(CustomStream::Plain(stream))
@@ -139,9 +178,10 @@ impl hyper::service::Service<Uri> for CustomConnector {
                     let socket_addr = {
                         let host = host.to_string();
                         let port = req.port_u16().unwrap_or(443);
-                        smol::unblock(move || {
-                            (host.as_str(), port).to_socket_addrs()
-                        }).await?.next().context("cannot resolve host")?
+                        smol::unblock(move || (host.as_str(), port).to_socket_addrs())
+                            .await?
+                            .next()
+                            .context("cannot resolve host")?
                     };
                     let stream = Async::<TcpStream>::connect(socket_addr).await?;
                     let stream = async_native_tls::TlsConnector::new()
@@ -166,7 +206,10 @@ struct Runtime {
 impl Runtime {
     fn new() -> Self {
         let num_cores = std::thread::available_parallelism().unwrap().get();
-        Self { high_num: num_cores, low_num: 1 }
+        Self {
+            high_num: num_cores,
+            low_num: 1,
+        }
     }
 
     pub fn with_high_priority_threads(mut self, num: usize) -> Self {
@@ -185,8 +228,8 @@ impl Runtime {
             std::env::set_var("LOW_PRIORITY_THREADS", self.low_num.to_string());
         }
 
-        let high = spawn_task!(async { }, FuturePriority::High);
-        let low = spawn_task!(async { }, FuturePriority::Low);
+        let high = spawn_task!(async {}, FuturePriority::High);
+        let low = spawn_task!(async {}, FuturePriority::Low);
         join!(high, low);
     }
 }
@@ -422,7 +465,6 @@ enum FuturePriority {
 trait PrioritizedFuture: Future {
     fn priority(&self) -> FuturePriority;
 }
-
 
 fn demo_one() {
     let one = CounterFuture {
