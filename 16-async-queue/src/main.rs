@@ -73,22 +73,7 @@ fn main() {
         .with_high_priority_threads(4)
         .run();
 
-    let future = async {
-        let req = Request::get("https://wcygan.net/")
-            .body(Body::empty())
-            .unwrap();
-
-        let response = fetch(req).await.unwrap();
-
-        let body_bytes = hyper::body::to_bytes(response.into_body())
-            .await.unwrap();
-
-        let html = String::from_utf8(body_bytes.to_vec()).unwrap();
-        println!("{}", html);
-    };
-
-    let test = spawn_task!(future);
-    let _outcome = future::block_on(test);
+    demo_two()
 }
 
 struct CustomExecutor {}
@@ -535,4 +520,23 @@ fn demo_one() {
     let outcome_two: Vec<()> = join!(t_tree);
     println!("Outcome one: {:?}", outcome);
     println!("Outcome two: {:?}", outcome_two);
+}
+
+fn demo_two() {
+    let future = async {
+        let req = Request::get("https://wcygan.net/")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = fetch(req).await.unwrap();
+
+        let body_bytes = hyper::body::to_bytes(response.into_body())
+            .await.unwrap();
+
+        let html = String::from_utf8(body_bytes.to_vec()).unwrap();
+        println!("{}", html);
+    };
+
+    let test = spawn_task!(future);
+    let _outcome = future::block_on(test);
 }
