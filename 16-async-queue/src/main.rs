@@ -2,9 +2,9 @@ use anyhow::{bail, Context, Error};
 use async_native_tls::TlsStream;
 use async_task::{Runnable, Task};
 use flume::{Receiver, Sender};
-use futures_lite::AsyncRead;
 use futures_lite::AsyncWrite;
-use http::{header, Request, Uri};
+use futures_lite::{future, AsyncRead};
+use http::{Request, Uri};
 use hyper::client::connect::Connected;
 use hyper::{Body, Client};
 use smol::Async;
@@ -68,29 +68,27 @@ macro_rules! try_join {
 /// and the server we want to connect to. It handles activities like opening TCP connections
 /// and maintaining them through the lifetime of the request.
 fn main() {
-    Runtime::new().run();
-
-    // demo_one();
-
-    let url = "http://rust-lang.org";
-    let uri: Uri = url.parse().unwrap();
-
-    let request = Request::builder()
-        .method("GET")
-        .uri(uri)
-        .header(header::USER_AGENT, "hyper.0.14.2")
-        .header(header::ACCEPT, "text/html")
-        .body(hyper::Body::empty())
-        .unwrap();
+    Runtime::new()
+        .with_low_priority_threads(2)
+        .with_high_priority_threads(4)
+        .run();
 
     let future = async {
-        let client = hyper::Client::new();
-        client.request(request).await.unwrap()
+        let req = Request::get("https://wcygan.net/")
+            .body(Body::empty())
+            .unwrap();
+
+        let response = fetch(req).await.unwrap();
+
+        let body_bytes = hyper::body::to_bytes(response.into_body())
+            .await.unwrap();
+
+        let html = String::from_utf8(body_bytes.to_vec()).unwrap();
+        println!("{}", html);
     };
 
     let test = spawn_task!(future);
-    let resp = futures_lite::future::block_on(test);
-    println!("Response: {:?}", resp);
+    let _outcome = future::block_on(test);
 }
 
 struct CustomExecutor {}
