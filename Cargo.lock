@@ -329,6 +329,7 @@ dependencies = [
  "futures-lite 1.13.0",
  "http 0.2.12",
  "hyper 0.14.32",
+ "mio 1.0.3",
  "smol",
  "tokio",
 ]
@@ -2878,6 +2879,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2886843bf800fba2e3377cff24abf6379b4c4d5c6681eaf9ea5b0d15090450bd"
 dependencies = [
  "libc",
+ "log",
  "wasi 0.11.0+wasi-snapshot-preview1",
  "windows-sys 0.52.0",
 ]

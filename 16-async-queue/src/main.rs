@@ -7,12 +7,17 @@ use futures_lite::{future, AsyncRead};
 use http::{Request, Uri};
 use hyper::client::connect::Connected;
 use hyper::{Body, Client};
+use mio::net::TcpListener;
+use mio::{Events, Poll as MioPoll, Token};
 use smol::Async;
+use std::io::Read;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::panic::catch_unwind;
 use std::pin::Pin;
 use std::sync::LazyLock;
 use std::task::Poll;
+use std::task::Poll::Pending;
+use std::time::Duration;
 use tokio::io::ReadBuf;
 
 /// A macro to simplify spawning tasks with an optional priority argument.
@@ -74,6 +79,77 @@ fn main() {
         .run();
 
     demo_two()
+}
+
+/// The mio crate is built for handling many sockets (thousands). Therefore, we need to identify
+/// which socket triggered the notification. Tokens enable us to do this. When we register a socket
+/// with the event loop, we pass it a token, and that token is returned in the handler. The token is
+/// a struct tuple around usize. This is because every OS allows a pointer amount of data to be associated
+/// with a socket. So in the handler we can have a mapping function where the token is the key, and
+/// we map it with a socket.
+///
+/// mio is not using callbacks here because we want a zero cost abstraction, and tokens are the only
+/// way of doing that. We can build callbacks, streams, and futures on top of mio.
+///
+/// With tokens, we now have the following steps:
+///   1. Register the sockets with the event loop
+///   2. Wait for socket readiness
+///   3. Look up the socket state by using the token
+///   4. Operate on the socket
+///   5. Repeat
+///
+/// Our simple example negates the need for mapping, so we define our tokens with the following
+/// since we just need to ensure that our tokens are unique.
+const SERVER: Token = Token(0);
+const CLIENT: Token = Token(1);
+
+/// Now that we have our tokens, we can define the future that is going to poll the socket:
+struct ServerFuture {
+    server: TcpListener,
+    poll: MioPoll,
+}
+
+impl Future for ServerFuture {
+    type Output = String;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
+        let mut events = Events::with_capacity(1);
+
+        let _ = self.poll.poll(&mut events, Some(Duration::from_millis(200))).unwrap();
+
+        for event in events.iter() {
+            if event.token() == SERVER && event.is_readable() {
+                let (mut stream, _) = self.server.accept().unwrap();
+                let mut buffer = [0u8; 1024];
+                let mut received_data = Vec::new();
+
+                loop {
+                    match stream.read(&mut buffer) {
+                        Ok(n) => {
+                            if n > 0 {
+                                received_data.extend_from_slice(&buffer[..n]);
+                            }
+                        }
+                        Err(e) => {
+                            eprintln!("Error reading from stream: {}", e);
+                            break;
+                        }
+                    }
+                }
+
+                if !received_data.is_empty() {
+                    let received_str = String::from_utf8_lossy(&received_data);
+                    return Poll::Ready(received_str.to_string());
+                }
+
+                cx.waker().wake_by_ref();
+                return Pending;
+            }
+        }
+
+        cx.waker().wake_by_ref();
+        Pending
+    }
 }
 
 struct CustomExecutor {}
