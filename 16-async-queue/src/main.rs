@@ -3,9 +3,10 @@ use async_native_tls::TlsStream;
 use async_task::{Runnable, Task};
 use flume::{Receiver, Sender};
 use futures_lite::AsyncRead;
+use futures_lite::AsyncWrite;
 use http::{header, Request, Uri};
 use smol::Async;
-use std::net::{TcpStream, ToSocketAddrs};
+use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::panic::catch_unwind;
 use std::pin::Pin;
 use std::sync::LazyLock;
@@ -140,6 +141,44 @@ impl tokio::io::AsyncRead for CustomStream {
                     .map_ok(|size| {
                         buf.advance(size);
                     })
+            }
+        }
+    }
+}
+
+/// The AsyncWrite trait is similar to the std::io::Write trait but integrates with asynchronous
+/// task systems. It writes bytes asynchronously.
+impl tokio::io::AsyncWrite for CustomStream {
+    fn poll_write(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &[u8]) -> Poll<Result<usize, std::io::Error>> {
+        match &mut *self {
+            CustomStream::Plain(s) => {
+                Pin::new(s).poll_write(cx, buf)
+            }
+            CustomStream::Tls(s) => {
+                Pin::new(s).poll_write(cx, buf)
+            }
+        }
+    }
+
+    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        match &mut *self {
+            CustomStream::Plain(s) => {
+                Pin::new(s).poll_flush(cx)
+            }
+            CustomStream::Tls(s) => {
+                Pin::new(s).poll_flush(cx)
+            }
+        }
+    }
+
+    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Result<(), std::io::Error>> {
+        match &mut *self {
+            CustomStream::Plain(s) => {
+                s.get_mut().shutdown(Shutdown::Write)?;
+                Poll::Ready(Ok(()))
+            }
+            CustomStream::Tls(s) => {
+                Pin::new(s).poll_close(cx)
             }
         }
     }
