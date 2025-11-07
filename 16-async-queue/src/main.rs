@@ -5,6 +5,8 @@ use flume::{Receiver, Sender};
 use futures_lite::AsyncRead;
 use futures_lite::AsyncWrite;
 use http::{header, Request, Uri};
+use hyper::client::connect::Connected;
+use hyper::{Body, Client};
 use smol::Async;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::panic::catch_unwind;
@@ -91,13 +93,13 @@ fn main() {
     println!("Response: {:?}", resp);
 }
 
-struct CustomExectutor {}
+struct CustomExecutor {}
 
 /// This code defines our custom executor and the behavior of the execute function.
 /// Inside this function, we call `spawn_task!` to spawn the future onto our custom task queues.
 /// We call `detach` to avoid closing the channel due to the task being dropped.
 ///
-impl<F: Future + Send + 'static> hyper::rt::Executor<F> for CustomExectutor {
+impl<F: Future + Send + 'static> hyper::rt::Executor<F> for CustomExecutor {
     fn execute(&self, fut: F) {
         spawn_task!(async {
             println!("Executing");
@@ -182,6 +184,20 @@ impl tokio::io::AsyncWrite for CustomStream {
             }
         }
     }
+}
+
+impl hyper::client::connect::Connection for CustomStream {
+    fn connected(&self) -> Connected {
+        hyper::client::connect::Connected::new()
+    }
+}
+
+async fn fetch(req: Request<Body>) -> anyhow::Result<hyper::Response<Body>> {
+    Ok(Client::builder()
+        .executor(CustomExecutor {})
+        .build::<_, Body>(CustomConnector {})
+        .request(req)
+        .await?)
 }
 
 #[derive(Clone)]
