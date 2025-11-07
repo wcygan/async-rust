@@ -1,10 +1,14 @@
+use anyhow::{bail, Context, Error};
+use async_native_tls::TlsStream;
 use async_task::{Runnable, Task};
 use flume::{Receiver, Sender};
 use http::{header, Request, Uri};
+use smol::Async;
+use std::net::{TcpStream, ToSocketAddrs};
 use std::panic::catch_unwind;
 use std::pin::Pin;
 use std::sync::LazyLock;
-use std::task::{Context, Poll};
+use std::task::Poll;
 
 /// A macro to simplify spawning tasks with an optional priority argument.
 /// If no priority is provided, it defaults to `FuturePriority::Low`.
@@ -95,6 +99,60 @@ impl<F: Future + Send + 'static> hyper::rt::Executor<F> for CustomExectutor {
             println!("Executing");
             fut.await;
         }).detach();
+    }
+}
+
+enum CustomStream {
+    Plain(Async<TcpStream>),
+    Tls(TlsStream<Async<TcpStream>>),
+}
+
+#[derive(Clone)]
+struct CustomConnector {}
+
+impl hyper::service::Service<Uri> for CustomConnector {
+    type Response = CustomStream;
+    type Error = Error;
+    type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + Send>>;
+
+    fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: Uri) -> Self::Future {
+        Box::pin(async move {
+            let host = req.host().context("cannot get host")?;
+
+            match req.scheme_str() {
+                Some("http") => {
+                    let port = req.port_u16().unwrap_or(80);
+                    let socket_addr = {
+                        let host = host.to_string();
+                        smol::unblock(move || {
+                            (host.as_str(), port).to_socket_addrs()
+                        }).await?.next().context("cannot resolve host")?
+                    };
+                    let stream = Async::<TcpStream>::connect(socket_addr).await?;
+                    Ok(CustomStream::Plain(stream))
+                }
+                Some("https") => {
+                    let socket_addr = {
+                        let host = host.to_string();
+                        let port = req.port_u16().unwrap_or(443);
+                        smol::unblock(move || {
+                            (host.as_str(), port).to_socket_addrs()
+                        }).await?.next().context("cannot resolve host")?
+                    };
+                    let stream = Async::<TcpStream>::connect(socket_addr).await?;
+                    let stream = async_native_tls::TlsConnector::new()
+                        .connect(host, stream)
+                        .await?;
+
+                    Ok(CustomStream::Tls(stream))
+                }
+                _ => bail!("unsupported scheme"),
+            }
+        })
     }
 }
 
@@ -296,7 +354,7 @@ impl PrioritizedFuture for CounterFuture {
 impl Future for CounterFuture {
     type Output = u32;
 
-    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         self.count += 1;
         println!("Future count: {}", self.count);
         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -344,7 +402,7 @@ impl PrioritizedFuture for AsyncSleep {
 impl Future for AsyncSleep {
     type Output = bool;
 
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+    fn poll(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let elapsed = self.start.elapsed();
         if elapsed >= self.duration {
             Poll::Ready(true)
