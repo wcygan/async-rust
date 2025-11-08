@@ -10,7 +10,7 @@ use hyper::{Body, Client};
 use mio::net::TcpListener;
 use mio::{Events, Interest, Poll as MioPoll, Token};
 use smol::Async;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
 use std::panic::catch_unwind;
 use std::pin::Pin;
@@ -85,20 +85,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut stream = mio::net::TcpStream::connect(server.local_addr()?)?;
 
     let poll: MioPoll = MioPoll::new()?;
-    poll.registry().register(&mut server, SERVER, Interest::READABLE)?;
+    poll.registry()
+        .register(&mut server, SERVER, Interest::READABLE)?;
 
-    let server_worker = ServerFuture {
-        server,
-        poll,
-    };
+    let server_worker = ServerFuture { server, poll };
 
     let test = spawn_task!(server_worker);
 
     let mut client_poll: MioPoll = MioPoll::new()?;
-    client_poll.registry().register(&mut stream, CLIENT, Interest::WRITABLE)?;
+    client_poll
+        .registry()
+        .register(&mut stream, CLIENT, Interest::WRITABLE)?;
 
     let mut events = Events::with_capacity(128);
     let _ = client_poll.poll(&mut events, None).unwrap();
+
+    for event in events.iter() {
+        if event.token() == CLIENT && event.is_writable() {
+            let message = "that's so dingo!\n";
+            let _ = stream.write_all(message.as_bytes());
+        }
+    }
+
+    let outcome = future::block_on(test);
+    println!("outcome: {}", outcome);
 
     Ok(())
 }
@@ -137,7 +147,10 @@ impl Future for ServerFuture {
     fn poll(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Self::Output> {
         let mut events = Events::with_capacity(1);
 
-        let _ = self.poll.poll(&mut events, Some(Duration::from_millis(200))).unwrap();
+        let _ = self
+            .poll
+            .poll(&mut events, Some(Duration::from_millis(200)))
+            .unwrap();
 
         for event in events.iter() {
             if event.token() == SERVER && event.is_readable() {
@@ -232,37 +245,37 @@ impl tokio::io::AsyncRead for CustomStream {
 /// The AsyncWrite trait is similar to the std::io::Write trait but integrates with asynchronous
 /// task systems. It writes bytes asynchronously.
 impl tokio::io::AsyncWrite for CustomStream {
-    fn poll_write(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>, buf: &[u8]) -> Poll<Result<usize, std::io::Error>> {
+    fn poll_write(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> Poll<Result<usize, std::io::Error>> {
         match &mut *self {
-            CustomStream::Plain(s) => {
-                Pin::new(s).poll_write(cx, buf)
-            }
-            CustomStream::Tls(s) => {
-                Pin::new(s).poll_write(cx, buf)
-            }
+            CustomStream::Plain(s) => Pin::new(s).poll_write(cx, buf),
+            CustomStream::Tls(s) => Pin::new(s).poll_write(cx, buf),
         }
     }
 
-    fn poll_flush(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Result<(), std::io::Error>> {
+    fn poll_flush(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         match &mut *self {
-            CustomStream::Plain(s) => {
-                Pin::new(s).poll_flush(cx)
-            }
-            CustomStream::Tls(s) => {
-                Pin::new(s).poll_flush(cx)
-            }
+            CustomStream::Plain(s) => Pin::new(s).poll_flush(cx),
+            CustomStream::Tls(s) => Pin::new(s).poll_flush(cx),
         }
     }
 
-    fn poll_shutdown(mut self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> Poll<Result<(), std::io::Error>> {
+    fn poll_shutdown(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Result<(), std::io::Error>> {
         match &mut *self {
             CustomStream::Plain(s) => {
                 s.get_mut().shutdown(Shutdown::Write)?;
                 Poll::Ready(Ok(()))
             }
-            CustomStream::Tls(s) => {
-                Pin::new(s).poll_close(cx)
-            }
+            CustomStream::Tls(s) => Pin::new(s).poll_close(cx),
         }
     }
 }
@@ -628,8 +641,7 @@ fn demo_two() {
 
         let response = fetch(req).await.unwrap();
 
-        let body_bytes = hyper::body::to_bytes(response.into_body())
-            .await.unwrap();
+        let body_bytes = hyper::body::to_bytes(response.into_body()).await.unwrap();
 
         let html = String::from_utf8(body_bytes.to_vec()).unwrap();
         println!("{}", html);
