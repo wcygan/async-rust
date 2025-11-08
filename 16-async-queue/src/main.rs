@@ -8,7 +8,7 @@ use http::{Request, Uri};
 use hyper::client::connect::Connected;
 use hyper::{Body, Client};
 use mio::net::TcpListener;
-use mio::{Events, Poll as MioPoll, Token};
+use mio::{Events, Interest, Poll as MioPoll, Token};
 use smol::Async;
 use std::io::Read;
 use std::net::{Shutdown, TcpStream, ToSocketAddrs};
@@ -72,13 +72,35 @@ macro_rules! try_join {
 /// A connector in networking is a component that establishes a connection between our application
 /// and the server we want to connect to. It handles activities like opening TCP connections
 /// and maintaining them through the lifetime of the request.
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     Runtime::new()
         .with_low_priority_threads(2)
         .with_high_priority_threads(4)
         .run();
 
-    demo_two()
+    demo_two();
+
+    let addr = "127.0.0.1:13264".parse()?;
+    let mut server = TcpListener::bind(addr)?;
+    let mut stream = mio::net::TcpStream::connect(server.local_addr()?)?;
+
+    let poll: MioPoll = MioPoll::new()?;
+    poll.registry().register(&mut server, SERVER, Interest::READABLE)?;
+
+    let server_worker = ServerFuture {
+        server,
+        poll,
+    };
+
+    let test = spawn_task!(server_worker);
+
+    let mut client_poll: MioPoll = MioPoll::new()?;
+    client_poll.registry().register(&mut stream, CLIENT, Interest::WRITABLE)?;
+
+    let mut events = Events::with_capacity(128);
+    let _ = client_poll.poll(&mut events, None).unwrap();
+
+    Ok(())
 }
 
 /// The mio crate is built for handling many sockets (thousands). Therefore, we need to identify
