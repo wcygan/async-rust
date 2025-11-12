@@ -17,6 +17,7 @@ members = [
     "15-async-logger",
     "16-async-queue",
     "17-background-process",
+    "18-hello-raft",
 ]
 resolver = "2"
 
