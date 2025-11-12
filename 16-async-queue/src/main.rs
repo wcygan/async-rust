@@ -1,9 +1,9 @@
-use anyhow::{bail, Context, Error};
+use anyhow::{Context, Error, bail};
 use async_native_tls::TlsStream;
 use async_task::{Runnable, Task};
 use flume::{Receiver, Sender};
 use futures_lite::AsyncWrite;
-use futures_lite::{future, AsyncRead};
+use futures_lite::{AsyncRead, future};
 use http::{Request, Uri};
 use hyper::client::connect::Connected;
 use hyper::{Body, Client};
@@ -199,7 +199,7 @@ impl<F: Future + Send + 'static> hyper::rt::Executor<F> for CustomExecutor {
             println!("Executing");
             fut.await;
         })
-            .detach();
+        .detach();
     }
 }
 
@@ -300,7 +300,7 @@ struct CustomConnector {}
 impl hyper::service::Service<Uri> for CustomConnector {
     type Response = CustomStream;
     type Error = Error;
-    type Future = Pin<Box<dyn Future<Output=Result<Self::Response, Self::Error>> + Send>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Self::Response, Self::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -407,7 +407,7 @@ impl Runtime {
 /// ensure that the lifetime is `'static`.
 fn spawn_task<F, T>(future: F, order: FuturePriority) -> Task<T>
 where
-    F: Future<Output=T> + Send + 'static,
+    F: Future<Output = T> + Send + 'static,
     T: Send + 'static,
 {
     let schedule_high_priority = |runnable: Runnable| {

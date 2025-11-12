@@ -43,12 +43,10 @@ type FileJoinHandle = JoinHandle<Result<bool, String>>;
 /// function that creates a file or obtains the handle of an existing file:
 fn get_file_handle(file_path: &dyn ToString) -> AsyncFileHandle {
     match OpenOptions::new().append(true).open(file_path.to_string()) {
-        Ok(opened_file) => {
-            Arc::new(Mutex::new(opened_file))
-        }
+        Ok(opened_file) => Arc::new(Mutex::new(opened_file)),
         Err(_) => {
-            let created_file = File::create(file_path.to_string())
-                .expect("Failed to create log file");
+            let created_file =
+                File::create(file_path.to_string()).expect("Failed to create log file");
             Arc::new(Mutex::new(created_file))
         }
     }
@@ -64,11 +62,9 @@ impl Future for AsyncWriteFuture {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut guard = match self.handle.try_lock() {
-            Ok(guard) => { guard }
+            Ok(guard) => guard,
             Err(error) => {
-                println!(
-                    "Error for {}: {}", self.entry, error
-                );
+                println!("Error for {}: {}", self.entry, error);
                 cx.waker().wake_by_ref();
                 return Poll::Pending;
             }
@@ -94,9 +90,7 @@ fn write_log(file_handle: AsyncFileHandle, line: String) -> FileJoinHandle {
         entry: line,
     };
 
-    tokio::task::spawn(async move {
-        future.await
-    })
+    tokio::task::spawn(async move { future.await })
 }
 
 /// Ensuring Ordering in Asynchronous Operations

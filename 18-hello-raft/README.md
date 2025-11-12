@@ -5,7 +5,7 @@ Hands-on Raft playground built on [`raft-rs`](https://github.com/tikv/raft-rs). 
 ## Quick Start
 
 ```bash
-cargo run -p 18-hello-raft -- demo basic
+cargo run -p hello_raft -- demo basic
 ```
 
 That command (once implemented) will:
@@ -14,7 +14,7 @@ That command (once implemented) will:
 2. Let them elect a leader.
 3. Propose a `Command::Put` entry and apply it across the cluster, printing the resulting key/value state per node.
 
-Additional subcommands (lagging follower, drop leader, async runtime, etc.) are sketched in `PLAN.md`.
+Additional subcommands (lagging follower, drop leader, async runtime, etc.) are sketched in `PLAN.md`. The package itself is named `hello_raft` because Cargo disallows names that start with digits.
 
 ## Modules (planned)
 
