@@ -15,10 +15,4 @@ impl CommandPayload {
     pub fn decode(bytes: &[u8]) -> Result<Self> {
         Ok(bincode::deserialize(bytes)?)
     }
-
-    pub fn describe(&self) -> String {
-        match self {
-            CommandPayload::Put { key, value } => format!("Put({key}={value})"),
-        }
-    }
 }

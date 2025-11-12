@@ -49,13 +49,10 @@ processes.
 ## File structure
 
 - `src/command.rs` — `CommandPayload` definitions and serialization helpers.
-- `src/store.rs` — simple `KvStore` with snapshots for debugging.
+- `src/store.rs` — minimal `KvStore` used by every node.
 - `src/node.rs` — thin wrapper around `RawNode<MemStorage>` that mirrors the
   Ready loop from the Raft docs.
-- `src/cluster.rs` — in-memory network that routes Raft messages between nodes
-  and exposes helpers for proposing, waiting, and inspecting snapshots.
-- `src/topology.rs` — keeps node listings consistent and ensures odd sizes.
-- `src/protocol.rs` — CLI parsing shared by the REPL and (minimal) TCP helpers.
+- `src/protocol.rs` — CLI parsing shared by the REPL and helpers.
 - `src/runtime.rs` — orchestrates the Raft-ready loop, networking, and command
   queue for a single node.
 - `src/bin/node.rs` — CLI front-end for each process.

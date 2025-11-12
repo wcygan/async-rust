@@ -141,6 +141,7 @@ struct Worker {
     client_rx: Receiver<ClientRequest>,
     network_rx: Receiver<Message>,
     pending_puts: Vec<PendingPut>,
+    last_role: StateRole,
 }
 
 impl Worker {
@@ -150,12 +151,14 @@ impl Worker {
         client_rx: Receiver<ClientRequest>,
         network_rx: Receiver<Message>,
     ) -> Self {
+        let last_role = node.role();
         Self {
             node,
             peers,
             client_rx,
             network_rx,
             pending_puts: Vec::new(),
+            last_role,
         }
     }
 
@@ -193,6 +196,7 @@ impl Worker {
             }
 
             self.process_ready()?;
+            self.log_role_change();
         }
 
         Ok(())
@@ -271,6 +275,28 @@ impl Worker {
         {
             let pending = self.pending_puts.remove(index);
             let _ = pending.respond_to.send(Ok(report.value));
+            println!(
+                "[node {}] applied key={} value={} (index {}, term {})",
+                self.node.id(),
+                report.key,
+                pending.value,
+                report.index,
+                report.term
+            );
+        }
+    }
+
+    fn log_role_change(&mut self) {
+        let current = self.node.role();
+        if current != self.last_role {
+            println!(
+                "[node {}] role changed {:?} -> {:?} (leader: {})",
+                self.node.id(),
+                self.last_role,
+                current,
+                self.node.leader_id()
+            );
+            self.last_role = current;
         }
     }
 }

@@ -25,24 +25,4 @@ impl KvStore {
     pub fn snapshot(&self) -> BTreeMap<String, String> {
         self.data.lock().unwrap().clone()
     }
-
-    pub fn entries(&self) -> Vec<(String, String)> {
-        self.data
-            .lock()
-            .unwrap()
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect()
-    }
-
-    pub fn replace_all<I>(&self, entries: I)
-    where
-        I: IntoIterator<Item = (String, String)>,
-    {
-        let mut guard = self.data.lock().unwrap();
-        guard.clear();
-        for (k, v) in entries {
-            guard.insert(k, v);
-        }
-    }
 }
