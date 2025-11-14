@@ -396,18 +396,29 @@ impl Worker {
                 value,
                 respond_to,
             } => {
-                let payload = CommandPayload::Put {
-                    key: key.clone(),
-                    value: value.clone(),
-                };
-                if let Err(err) = self.node.propose(&payload) {
+                // Only leaders can accept write operations (educational: makes Raft model explicit)
+                if self.node.role() != StateRole::Leader {
+                    let leader_id = self.node.leader_id();
+                    let err = if leader_id == 0 {
+                        anyhow!("No leader elected yet. Try again after a leader is elected.")
+                    } else {
+                        anyhow!("Write operations must be sent to the leader (Node {})", leader_id)
+                    };
                     let _ = respond_to.send(Err(err));
                 } else {
-                    self.pending_puts.push(PendingPut {
-                        key,
-                        value,
-                        respond_to,
-                    });
+                    let payload = CommandPayload::Put {
+                        key: key.clone(),
+                        value: value.clone(),
+                    };
+                    if let Err(err) = self.node.propose(&payload) {
+                        let _ = respond_to.send(Err(err));
+                    } else {
+                        self.pending_puts.push(PendingPut {
+                            key,
+                            value,
+                            respond_to,
+                        });
+                    }
                 }
             }
             ClientRequest::Get { key, respond_to } => {
