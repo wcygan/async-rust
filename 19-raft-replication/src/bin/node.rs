@@ -85,6 +85,8 @@ struct App {
     output_lines: Vec<String>,
     /// Scroll offset for output window
     scroll_offset: usize,
+    /// Last known output window height (for auto-scroll calculation)
+    last_output_height: usize,
     /// Node handle for sending commands
     handle: NodeHandle,
     /// Log message receiver
@@ -124,6 +126,7 @@ impl App {
                 String::new(),
             ],
             scroll_offset: 0,
+            last_output_height: 20, // Initial estimate, will be updated on first render
             handle,
             log_rx,
             role: StateRole::Follower,
@@ -136,12 +139,21 @@ impl App {
 
     /// Processes log messages from the worker (non-blocking).
     fn drain_logs(&mut self) {
+        let was_at_bottom = self.is_at_bottom();
+        let mut added_lines = false;
+
         while let Ok(log) = self.log_rx.try_recv() {
             let line = match log {
                 LogMessage::Info(msg) => msg,
                 LogMessage::Error(msg) => format!("ERROR: {}", msg),
             };
             self.output_lines.push(line);
+            added_lines = true;
+        }
+
+        // Auto-scroll to show new messages if we were at bottom
+        if added_lines && was_at_bottom {
+            self.scroll_to_bottom();
         }
     }
 
@@ -153,6 +165,25 @@ impl App {
             self.term = status.term;
             self.last_status_update = Instant::now();
         }
+    }
+
+    /// Checks if the output window is scrolled to the bottom.
+    ///
+    /// Returns true if we're showing the latest messages (auto-scroll position).
+    /// Used to determine whether to auto-scroll when new messages arrive.
+    fn is_at_bottom(&self) -> bool {
+        let total_lines = self.output_lines.len();
+        let max_scroll = total_lines.saturating_sub(self.last_output_height);
+        self.scroll_offset >= max_scroll
+    }
+
+    /// Scrolls the output window to show the latest messages.
+    ///
+    /// Called automatically when new messages arrive if we were already at bottom.
+    /// This implements "sticky bottom" scrolling - stay at bottom unless user scrolls up.
+    fn scroll_to_bottom(&mut self) {
+        let total_lines = self.output_lines.len();
+        self.scroll_offset = total_lines.saturating_sub(self.last_output_height);
     }
 
     /// Handles keyboard input.
@@ -199,6 +230,9 @@ impl App {
         if input.is_empty() {
             return Ok(());
         }
+
+        // Check if we should auto-scroll after adding output
+        let was_at_bottom = self.is_at_bottom();
 
         // Echo the command
         self.output_lines.push(format!("> {}", input));
@@ -298,6 +332,11 @@ impl App {
             }
         }
 
+        // Auto-scroll to show new output if we were at bottom
+        if was_at_bottom {
+            self.scroll_to_bottom();
+        }
+
         // Clear input
         self.input.clear();
         self.cursor_position = 0;
@@ -307,7 +346,7 @@ impl App {
 }
 
 /// Renders the TUI.
-fn render_ui(frame: &mut ratatui::Frame, app: &App) {
+fn render_ui(frame: &mut ratatui::Frame, app: &mut App) {
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
@@ -319,6 +358,7 @@ fn render_ui(frame: &mut ratatui::Frame, app: &App) {
 
     // Output window (scrollable logs)
     let output_height = chunks[0].height as usize;
+    app.last_output_height = output_height; // Track for auto-scroll calculation
     let total_lines = app.output_lines.len();
     let scroll_offset = app.scroll_offset.min(total_lines.saturating_sub(output_height));
     let visible_lines: Vec<ListItem> = app
