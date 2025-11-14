@@ -26,7 +26,7 @@
 
 use std::collections::HashMap;
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use clap::{Parser, ValueHint};
@@ -85,6 +85,8 @@ struct App {
     leader_id: u64,
     /// Current Raft term
     term: u64,
+    /// Last time status was updated
+    last_status_update: Instant,
     /// Whether to quit
     should_quit: bool,
 }
@@ -112,6 +114,7 @@ impl App {
             role: StateRole::Follower,
             leader_id: 0,
             term: 0,
+            last_status_update: Instant::now(),
             should_quit: false,
         }
     }
@@ -133,6 +136,7 @@ impl App {
             self.role = status.role;
             self.leader_id = status.leader_id;
             self.term = status.term;
+            self.last_status_update = Instant::now();
         }
     }
 
@@ -387,8 +391,8 @@ fn run_tui(
             }
         }
 
-        // Periodically update status
-        if app.output_lines.len() % 10 == 0 {
+        // Update status every 50ms for real-time display
+        if app.last_status_update.elapsed() >= Duration::from_millis(50) {
             app.update_status();
         }
 
