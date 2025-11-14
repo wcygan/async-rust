@@ -18,6 +18,8 @@ use anyhow::{Result, anyhow};
 pub enum ConsoleCommand {
     Put { key: String, value: String },
     Get { key: String },
+    Keys,
+    Scan,
     Status,
     Campaign,
     Exit,
@@ -41,6 +43,8 @@ impl ConsoleCommand {
     /// Commands are case-insensitive and support aliases:
     /// - `PUT <key> <value>` (alias: `p`) - Store a key-value pair (requires `allow_put = true`)
     /// - `GET <key>` (alias: `g`) - Retrieve a value
+    /// - `KEYS` (alias: `k`) - List all keys in the store
+    /// - `SCAN` (alias: `sc`) - Display all key-value pairs
     /// - `STATUS` (alias: `s`) - Show node role, leader, and store contents
     /// - `CAMPAIGN` (alias: `c`) - Force this node to start an election
     /// - `HELP` (alias: `h`) - Print command reference
@@ -62,6 +66,8 @@ impl ConsoleCommand {
         let normalized_cmd = match cmd.as_str() {
             "P" => "PUT",
             "G" => "GET",
+            "K" => "KEYS",
+            "SC" => "SCAN",
             "S" => "STATUS",
             "C" => "CAMPAIGN",
             "H" => "HELP",
@@ -73,6 +79,8 @@ impl ConsoleCommand {
         match normalized_cmd {
             "EXIT" => return Ok(ConsoleCommand::Exit),
             "HELP" => return Ok(ConsoleCommand::Help),
+            "KEYS" => return Ok(ConsoleCommand::Keys),
+            "SCAN" => return Ok(ConsoleCommand::Scan),
             "STATUS" => return Ok(ConsoleCommand::Status),
             "CAMPAIGN" => return Ok(ConsoleCommand::Campaign),
             _ => {}
@@ -91,7 +99,7 @@ impl ConsoleCommand {
             ("GET", _) => Err(anyhow!("GET requires exactly one argument: GET <key>")),
             ("PUT", _) => Err(anyhow!("PUT requires exactly two arguments: PUT <key> <value>")),
             _ => Err(anyhow!(
-                "invalid command. Try: PUT/p <key> <value>, GET/g <key>, STATUS/s, HELP/h, EXIT/e"
+                "invalid command. Try: PUT/p, GET/g, KEYS/k, SCAN/sc, STATUS/s, CAMPAIGN/c, HELP/h, EXIT/e"
             )),
         }
     }
@@ -205,5 +213,23 @@ mod tests {
         assert!(matches!(ConsoleCommand::parse("Campaign", true), Ok(ConsoleCommand::Campaign)));
         assert!(matches!(ConsoleCommand::parse("c", true), Ok(ConsoleCommand::Campaign)));
         assert!(matches!(ConsoleCommand::parse("C", true), Ok(ConsoleCommand::Campaign)));
+    }
+
+    #[test]
+    fn test_keys_command() {
+        assert!(matches!(ConsoleCommand::parse("keys", true), Ok(ConsoleCommand::Keys)));
+        assert!(matches!(ConsoleCommand::parse("KEYS", true), Ok(ConsoleCommand::Keys)));
+        assert!(matches!(ConsoleCommand::parse("Keys", true), Ok(ConsoleCommand::Keys)));
+        assert!(matches!(ConsoleCommand::parse("k", true), Ok(ConsoleCommand::Keys)));
+        assert!(matches!(ConsoleCommand::parse("K", true), Ok(ConsoleCommand::Keys)));
+    }
+
+    #[test]
+    fn test_scan_command() {
+        assert!(matches!(ConsoleCommand::parse("scan", true), Ok(ConsoleCommand::Scan)));
+        assert!(matches!(ConsoleCommand::parse("SCAN", true), Ok(ConsoleCommand::Scan)));
+        assert!(matches!(ConsoleCommand::parse("Scan", true), Ok(ConsoleCommand::Scan)));
+        assert!(matches!(ConsoleCommand::parse("sc", true), Ok(ConsoleCommand::Scan)));
+        assert!(matches!(ConsoleCommand::parse("SC", true), Ok(ConsoleCommand::Scan)));
     }
 }
