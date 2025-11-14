@@ -181,9 +181,11 @@ impl App {
     ///
     /// Called automatically when new messages arrive if we were already at bottom.
     /// This implements "sticky bottom" scrolling - stay at bottom unless user scrolls up.
+    ///
+    /// Sets scroll_offset to total_lines, which the render function will clamp to
+    /// (total_lines - viewport_height), ensuring the newest content is visible.
     fn scroll_to_bottom(&mut self) {
-        let total_lines = self.output_lines.len();
-        self.scroll_offset = total_lines.saturating_sub(self.last_output_height);
+        self.scroll_offset = self.output_lines.len();
     }
 
     /// Handles keyboard input.
