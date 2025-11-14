@@ -20,6 +20,7 @@ pub enum ConsoleCommand {
     Get { key: String },
     Keys,
     Scan,
+    Clear,
     Status,
     Campaign,
     Exit,
@@ -45,6 +46,7 @@ impl ConsoleCommand {
     /// - `GET <key>` (alias: `g`) - Retrieve a value
     /// - `KEYS` (alias: `k`) - List all keys in the store
     /// - `SCAN` (alias: `sc`) - Display all key-value pairs
+    /// - `CLEAR` (alias: `cl`) - Clear the output window
     /// - `STATUS` (alias: `s`) - Show node role, leader, and store contents
     /// - `CAMPAIGN` (alias: `c`) - Force this node to start an election
     /// - `HELP` (alias: `h`) - Print command reference
@@ -68,6 +70,7 @@ impl ConsoleCommand {
             "G" => "GET",
             "K" => "KEYS",
             "SC" => "SCAN",
+            "CL" => "CLEAR",
             "S" => "STATUS",
             "C" => "CAMPAIGN",
             "H" => "HELP",
@@ -81,6 +84,7 @@ impl ConsoleCommand {
             "HELP" => return Ok(ConsoleCommand::Help),
             "KEYS" => return Ok(ConsoleCommand::Keys),
             "SCAN" => return Ok(ConsoleCommand::Scan),
+            "CLEAR" => return Ok(ConsoleCommand::Clear),
             "STATUS" => return Ok(ConsoleCommand::Status),
             "CAMPAIGN" => return Ok(ConsoleCommand::Campaign),
             _ => {}
@@ -99,7 +103,7 @@ impl ConsoleCommand {
             ("GET", _) => Err(anyhow!("GET requires exactly one argument: GET <key>")),
             ("PUT", _) => Err(anyhow!("PUT requires exactly two arguments: PUT <key> <value>")),
             _ => Err(anyhow!(
-                "invalid command. Try: PUT/p, GET/g, KEYS/k, SCAN/sc, STATUS/s, CAMPAIGN/c, HELP/h, EXIT/e"
+                "invalid command. Try: PUT/p, GET/g, KEYS/k, SCAN/sc, CLEAR/cl, STATUS/s, CAMPAIGN/c, HELP/h, EXIT/e"
             )),
         }
     }
@@ -231,5 +235,14 @@ mod tests {
         assert!(matches!(ConsoleCommand::parse("Scan", true), Ok(ConsoleCommand::Scan)));
         assert!(matches!(ConsoleCommand::parse("sc", true), Ok(ConsoleCommand::Scan)));
         assert!(matches!(ConsoleCommand::parse("SC", true), Ok(ConsoleCommand::Scan)));
+    }
+
+    #[test]
+    fn test_clear_command() {
+        assert!(matches!(ConsoleCommand::parse("clear", true), Ok(ConsoleCommand::Clear)));
+        assert!(matches!(ConsoleCommand::parse("CLEAR", true), Ok(ConsoleCommand::Clear)));
+        assert!(matches!(ConsoleCommand::parse("Clear", true), Ok(ConsoleCommand::Clear)));
+        assert!(matches!(ConsoleCommand::parse("cl", true), Ok(ConsoleCommand::Clear)));
+        assert!(matches!(ConsoleCommand::parse("CL", true), Ok(ConsoleCommand::Clear)));
     }
 }

@@ -119,7 +119,7 @@ impl App {
             cursor_position: 0,
             output_lines: vec![
                 format!("Node {} ready. Type HELP (or h) for commands.", node_id),
-                "Commands: PUT/p, GET/g, KEYS/k, SCAN/sc, STATUS/s, CAMPAIGN/c, HELP/h, EXIT/e".to_string(),
+                "Commands: PUT/p, GET/g, KEYS/k, SCAN/sc, CLEAR/cl, STATUS/s, CAMPAIGN/c, HELP/h, EXIT/e".to_string(),
                 "Keyboard: Enter=submit, Ctrl-C/ESC=exit, Up/Down=scroll output".to_string(),
                 String::new(),
             ],
@@ -245,6 +245,10 @@ impl App {
                     }
                 }
             }
+            Ok(ConsoleCommand::Clear) => {
+                self.output_lines.clear();
+                self.scroll_offset = 0;
+            }
             Ok(ConsoleCommand::Status) => {
                 let status = self.handle.status()?;
                 self.output_lines.push(format!(
@@ -278,6 +282,7 @@ impl App {
                 self.output_lines.push("  GET <key>          (alias: g)   -- read local value".to_string());
                 self.output_lines.push("  KEYS               (alias: k)   -- list all keys".to_string());
                 self.output_lines.push("  SCAN               (alias: sc)  -- display all key-value pairs".to_string());
+                self.output_lines.push("  CLEAR              (alias: cl)  -- clear output window".to_string());
                 self.output_lines.push("  STATUS             (alias: s)   -- show node state".to_string());
                 self.output_lines.push("  CAMPAIGN           (alias: c)   -- force election".to_string());
                 self.output_lines.push("  HELP               (alias: h)   -- show this message".to_string());
