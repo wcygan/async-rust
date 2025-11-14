@@ -173,6 +173,7 @@ pub struct NodeStatus {
     pub node_id: u64,
     pub role: StateRole,
     pub leader_id: u64,
+    pub term: u64,
     pub store: BTreeMap<String, String>,
 }
 
@@ -417,6 +418,7 @@ impl Worker {
                     node_id: self.node.id(),
                     role: self.node.role(),
                     leader_id: self.node.leader_id(),
+                    term: self.node.term(),
                     store: self.node.snapshot(),
                 };
                 let _ = respond_to.send(status);
@@ -494,12 +496,16 @@ impl Worker {
         Ok(())
     }
 
-    /// Finds and notifies the client waiting for this PUT to be applied.
+    /// Logs applied entries and notifies any waiting clients.
     ///
-    /// Matches on (key, value) to find the pending request. This works for
-    /// this demo but has limitations (see [`PendingPut`] docs).
+    /// This function handles two responsibilities:
+    /// 1. **Log all applied entries** (for followers and leaders alike)
+    /// 2. **Notify waiting clients** (only on leader that proposed the entry)
     ///
-    /// # Why linear search?
+    /// Followers will log applied entries but won't have matching pending PUTs,
+    /// so the client notification step is skipped.
+    ///
+    /// # Why linear search for pending PUTs?
     ///
     /// We expect few pending PUTs at a time (typical workload: 1-10).
     /// Linear search is simpler than maintaining a HashMap and faster
@@ -508,6 +514,18 @@ impl Worker {
     /// For high-throughput systems with hundreds of pending requests,
     /// consider a HashMap keyed by request ID embedded in the command.
     fn notify_put(&mut self, report: ApplyReport) {
+        // Always log applied entries (for both followers and leaders)
+        let msg = format!(
+            "[node {}] applied key={} value={} (index {}, term {})",
+            self.node.id(),
+            report.key,
+            report.value,
+            report.index,
+            report.term
+        );
+        let _ = self.log_tx.send(LogMessage::Info(msg));
+
+        // Additionally notify waiting client if this node proposed the entry
         if let Some(index) = self
             .pending_puts
             .iter()
@@ -515,15 +533,6 @@ impl Worker {
         {
             let pending = self.pending_puts.remove(index);
             let _ = pending.respond_to.send(Ok(report.value));
-            let msg = format!(
-                "[node {}] applied key={} value={} (index {}, term {})",
-                self.node.id(),
-                report.key,
-                pending.value,
-                report.index,
-                report.term
-            );
-            let _ = self.log_tx.send(LogMessage::Info(msg));
         }
     }
 

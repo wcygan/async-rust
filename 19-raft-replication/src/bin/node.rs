@@ -83,6 +83,8 @@ struct App {
     role: StateRole,
     /// Current leader ID
     leader_id: u64,
+    /// Current Raft term
+    term: u64,
     /// Whether to quit
     should_quit: bool,
 }
@@ -109,6 +111,7 @@ impl App {
             log_rx,
             role: StateRole::Follower,
             leader_id: 0,
+            term: 0,
             should_quit: false,
         }
     }
@@ -129,6 +132,7 @@ impl App {
         if let Ok(status) = self.handle.status() {
             self.role = status.role;
             self.leader_id = status.leader_id;
+            self.term = status.term;
         }
     }
 
@@ -205,8 +209,8 @@ impl App {
             Ok(ConsoleCommand::Status) => {
                 let status = self.handle.status()?;
                 self.output_lines.push(format!(
-                    "Node {} | Role: {:?} | Leader: {}",
-                    status.node_id, status.role, status.leader_id
+                    "Node {} | Term: {} | Role: {:?} | Leader: {}",
+                    status.node_id, status.term, status.role, status.leader_id
                 ));
                 if status.store.is_empty() {
                     self.output_lines.push("  Store: empty".to_string());
@@ -217,6 +221,7 @@ impl App {
                 }
                 self.role = status.role;
                 self.leader_id = status.leader_id;
+                self.term = status.term;
             }
             Ok(ConsoleCommand::Campaign) => {
                 match self.handle.campaign() {
@@ -299,8 +304,8 @@ fn render_ui(frame: &mut ratatui::Frame, app: &App) {
 
     // Status bar
     let status_text = format!(
-        " Node {} | Role: {:?} | Leader: {} ",
-        app.node_id, app.role, app.leader_id
+        " Node {} | Term: {} | Role: {:?} | Leader: {} ",
+        app.node_id, app.term, app.role, app.leader_id
     );
     let status_style = match app.role {
         StateRole::Leader => Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
