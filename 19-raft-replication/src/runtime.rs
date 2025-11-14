@@ -34,6 +34,19 @@ use crate::node::{ApplyReport, RaftNode};
 /// (avoid spurious elections on temporary network delays).
 const TICK_INTERVAL: Duration = Duration::from_millis(100);
 
+/// Log messages emitted by the worker for display in the TUI.
+///
+/// The worker sends these through a channel instead of printing directly,
+/// allowing the TUI to display them in a scrollable output window alongside
+/// command results.
+#[derive(Debug, Clone)]
+pub enum LogMessage {
+    /// Informational message (role changes, applied entries, etc.)
+    Info(String),
+    /// Error message (network failures, Raft errors, etc.)
+    Error(String),
+}
+
 /// Configuration for spawning a Raft node.
 ///
 /// Specifies the node's identity and how to reach all cluster members.
@@ -120,6 +133,30 @@ impl NodeHandle {
             .map_err(Into::into)
     }
 
+    /// Forces this node to start an election campaign.
+    ///
+    /// This can be used to:
+    /// - Trigger an election manually for testing
+    /// - Simulate a leader crash (call from current leader)
+    /// - Simulate timeout detection (call from follower)
+    /// - Force a specific node to try becoming leader
+    ///
+    /// # Behavior by role
+    /// - **Follower**: Transitions to Candidate and starts election
+    /// - **Candidate**: Restarts the election with a new term
+    /// - **Leader**: Steps down and starts a new election (simulates crash)
+    ///
+    /// The election may succeed or fail depending on votes from peers.
+    pub fn campaign(&self) -> Result<String> {
+        let (resp_tx, resp_rx) = unbounded();
+        self.request_tx
+            .send(ClientRequest::Campaign {
+                respond_to: resp_tx,
+            })
+            .context("failed to send campaign request")?;
+        resp_rx.recv().context("campaign response channel closed")?
+    }
+
     /// Signals the worker to shut down gracefully.
     pub fn shutdown(&self) -> Result<()> {
         self.request_tx
@@ -156,6 +193,9 @@ enum ClientRequest {
     Status {
         respond_to: Sender<NodeStatus>,
     },
+    Campaign {
+        respond_to: Sender<Result<String>>,
+    },
     Shutdown,
 }
 
@@ -186,12 +226,14 @@ struct PendingPut {
 /// 1. Worker thread - runs the Raft event loop
 /// 2. Network listener - accepts incoming connections from peers
 /// 3. NodeHandle - allows the caller to send requests to the worker
+/// 4. Log receiver - allows the caller to receive log messages for display
 ///
 /// # Threading architecture
 ///
 /// - Worker owns the `RaftNode` (single-threaded, no locks)
 /// - Network listener runs in background, forwards messages via channel
 /// - Caller uses handle to send requests via channel
+/// - Caller receives log messages via returned channel
 ///
 /// # Errors
 ///
@@ -199,7 +241,7 @@ struct PendingPut {
 /// - `config.id` is not present in `config.peers`
 /// - Network listener fails to bind to `config.listen_addr`
 /// - Failed to create RaftNode
-pub fn spawn_node(config: NodeConfig) -> Result<NodeHandle> {
+pub fn spawn_node(config: NodeConfig) -> Result<(NodeHandle, Receiver<LogMessage>)> {
     let voters: Vec<u64> = {
         let mut v: Vec<u64> = config.peers.keys().copied().collect();
         v.sort_unstable();
@@ -215,21 +257,26 @@ pub fn spawn_node(config: NodeConfig) -> Result<NodeHandle> {
     let node = RaftNode::new(config.id, &voters)?;
     let (client_tx, client_rx) = unbounded();
     let (network_tx, network_rx) = unbounded();
+    let (log_tx, log_rx) = unbounded();
 
-    spawn_network_listener(config.listen_addr.clone(), network_tx)?;
+    spawn_network_listener(config.listen_addr.clone(), network_tx, log_tx.clone())?;
 
+    let log_tx_for_worker = log_tx.clone();
     thread::Builder::new()
         .name(format!("raft-worker-{}", config.id))
         .spawn(move || {
-            if let Err(err) = Worker::new(node, config.peers, client_rx, network_rx).run() {
-                eprintln!("raft worker crashed: {err:?}");
+            if let Err(err) = Worker::new(node, config.peers, client_rx, network_rx, log_tx_for_worker).run() {
+                // Send critical error to log channel before thread exits
+                let _ = log_tx.send(LogMessage::Error(
+                    format!("CRITICAL: raft worker crashed: {err:?}")
+                ));
             }
         })
         .expect("failed to spawn raft worker");
 
-    Ok(NodeHandle {
+    Ok((NodeHandle {
         request_tx: client_tx,
-    })
+    }, log_rx))
 }
 
 /// The worker that runs the Raft event loop.
@@ -246,6 +293,7 @@ struct Worker {
     peers: HashMap<u64, String>,
     client_rx: Receiver<ClientRequest>,
     network_rx: Receiver<Message>,
+    log_tx: Sender<LogMessage>,
     pending_puts: Vec<PendingPut>,
     last_role: StateRole,
 }
@@ -256,6 +304,7 @@ impl Worker {
         peers: HashMap<u64, String>,
         client_rx: Receiver<ClientRequest>,
         network_rx: Receiver<Message>,
+        log_tx: Sender<LogMessage>,
     ) -> Self {
         let last_role = node.role();
         Self {
@@ -263,6 +312,7 @@ impl Worker {
             peers,
             client_rx,
             network_rx,
+            log_tx,
             pending_puts: Vec::new(),
             last_role,
         }
@@ -336,6 +386,7 @@ impl Worker {
     /// - **PUT**: Propose to Raft, track as pending
     /// - **GET**: Read local state, respond immediately
     /// - **STATUS**: Snapshot state, respond immediately
+    /// - **CAMPAIGN**: Force election, respond with result
     /// - **Shutdown**: Signal loop exit
     fn handle_client_request(&mut self, req: ClientRequest) -> Result<bool> {
         match req {
@@ -369,6 +420,24 @@ impl Worker {
                     store: self.node.snapshot(),
                 };
                 let _ = respond_to.send(status);
+            }
+            ClientRequest::Campaign { respond_to } => {
+                let old_role = self.node.role();
+                match self.node.campaign() {
+                    Ok(()) => {
+                        let msg = format!(
+                            "Campaign initiated! Previous role: {:?}, starting election...",
+                            old_role
+                        );
+                        let _ = self.log_tx.send(LogMessage::Info(
+                            format!("[node {}] {}", self.node.id(), msg)
+                        ));
+                        let _ = respond_to.send(Ok(msg));
+                    }
+                    Err(err) => {
+                        let _ = respond_to.send(Err(err));
+                    }
+                }
             }
             ClientRequest::Shutdown => return Ok(false),
         }
@@ -416,10 +485,12 @@ impl Worker {
 
         let to = msg.to;
         let Some(addr) = self.peers.get(&to) else {
-            eprintln!("no address for peer {to}, dropping message");
+            let _ = self.log_tx.send(LogMessage::Error(
+                format!("no address for peer {to}, dropping message")
+            ));
             return Ok(());
         };
-        send_message(addr, &msg);
+        send_message(addr, &msg, &self.log_tx);
         Ok(())
     }
 
@@ -444,7 +515,7 @@ impl Worker {
         {
             let pending = self.pending_puts.remove(index);
             let _ = pending.respond_to.send(Ok(report.value));
-            println!(
+            let msg = format!(
                 "[node {}] applied key={} value={} (index {}, term {})",
                 self.node.id(),
                 report.key,
@@ -452,23 +523,25 @@ impl Worker {
                 report.index,
                 report.term
             );
+            let _ = self.log_tx.send(LogMessage::Info(msg));
         }
     }
 
-    /// Prints a message when the node's role changes.
+    /// Logs a message when the node's role changes.
     ///
     /// Helps with debugging and understanding cluster dynamics.
-    /// In production, this would go to structured logging.
+    /// Sends the message through the log channel for display in the TUI.
     fn log_role_change(&mut self) {
         let current = self.node.role();
         if current != self.last_role {
-            println!(
+            let msg = format!(
                 "[node {}] role changed {:?} -> {:?} (leader: {})",
                 self.node.id(),
                 self.last_role,
                 current,
                 self.node.leader_id()
             );
+            let _ = self.log_tx.send(LogMessage::Info(msg));
             self.last_role = current;
         }
     }
@@ -489,7 +562,7 @@ impl Worker {
 ///
 /// A production system would use async I/O (tokio, async-std) to handle
 /// thousands of concurrent connections efficiently.
-fn spawn_network_listener(addr: String, tx: Sender<Message>) -> Result<()> {
+fn spawn_network_listener(addr: String, tx: Sender<Message>, log_tx: Sender<LogMessage>) -> Result<()> {
     thread::Builder::new()
         .name(format!("raft-net-listener-{addr}"))
         .spawn(move || {
@@ -499,13 +572,20 @@ fn spawn_network_listener(addr: String, tx: Sender<Message>) -> Result<()> {
                 match stream {
                     Ok(stream) => {
                         let tx = tx.clone();
+                        let log_tx = log_tx.clone();
                         thread::spawn(move || {
                             if let Err(err) = handle_connection(stream, tx) {
-                                eprintln!("connection error: {err}");
+                                let _ = log_tx.send(LogMessage::Error(
+                                    format!("connection error: {err}")
+                                ));
                             }
                         });
                     }
-                    Err(err) => eprintln!("accept error: {err}"),
+                    Err(err) => {
+                        let _ = log_tx.send(LogMessage::Error(
+                            format!("accept error: {err}")
+                        ));
+                    }
                 }
             }
         })
@@ -539,7 +619,7 @@ fn handle_connection(mut stream: TcpStream, tx: Sender<Message>) -> Result<()> {
 /// Sends a Raft message to a peer.
 ///
 /// Creates a new TCP connection for each message (fire-and-forget).
-/// Errors are logged but don't crash the worker.
+/// Errors are logged to the TUI via the log channel.
 ///
 /// # Why not connection pooling?
 ///
@@ -549,10 +629,12 @@ fn handle_connection(mut stream: TcpStream, tx: Sender<Message>) -> Result<()> {
 ///
 /// Production systems would maintain persistent connections to peers
 /// to reduce latency and connection overhead.
-fn send_message(addr: &str, msg: &Message) {
+fn send_message(addr: &str, msg: &Message, log_tx: &Sender<LogMessage>) {
     let bytes = msg.encode_to_vec();
     if let Err(err) = try_send(addr, &bytes) {
-        eprintln!("failed to send message to {addr}: {err}");
+        let _ = log_tx.send(LogMessage::Error(
+            format!("failed to send message to {addr}: {err}")
+        ));
     }
 }
 

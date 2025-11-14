@@ -10,6 +10,7 @@ clap = { workspace = true, features = ["derive"] }
 raft = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 slog = { workspace = true }
-rustyline = { workspace = true }
 crossbeam-channel = { workspace = true }
 prost = { workspace = true }
+ratatui = { workspace = true }
+crossterm = { workspace = true }

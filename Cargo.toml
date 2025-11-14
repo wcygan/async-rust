@@ -34,6 +34,8 @@ raft = { version = "0.7.0", default-features = false, features = ["prost-codec"]
 rustyline = "14.0.0"
 crossbeam-channel = "0.5.13"
 prost = "0.11.9"
+ratatui = "0.29"
+crossterm = "0.28"
 
 # Crates used in specific projects
 reqwest = { version = "0.12.15", features = ["json"] }
