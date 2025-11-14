@@ -4,6 +4,16 @@
 //! interacting with the distributed key-value store. The TUI shows real-time
 //! logs from the Raft worker alongside user commands.
 //!
+//! # TUI Update Strategy
+//!
+//! The status bar (term, role, leader) updates every 50ms via polling, which is:
+//! - Half the Raft tick interval (100ms), ensuring we see state changes promptly
+//! - Fast enough for real-time visibility during elections (1-2 seconds total)
+//! - Low overhead at 20Hz update rate (single channel query per update)
+//!
+//! This time-based approach replaced the previous log-line-based updates, which
+//! caused stale displays when logs were quiet.
+//!
 //! # Example usage
 //!
 //! Start a 3-node cluster:
@@ -85,7 +95,12 @@ struct App {
     leader_id: u64,
     /// Current Raft term
     term: u64,
-    /// Last time status was updated
+    /// Last time status was updated from worker
+    ///
+    /// Status is polled every 50ms to provide real-time visibility of role changes,
+    /// term increments, and leader transitions during elections. This is half the
+    /// Raft tick interval (100ms), ensuring we display state changes promptly without
+    /// excessive overhead.
     last_status_update: Instant,
     /// Whether to quit
     should_quit: bool,
@@ -392,6 +407,14 @@ fn run_tui(
         }
 
         // Update status every 50ms for real-time display
+        //
+        // Why 50ms?
+        // - Real-time visibility: Elections complete within 1-2 seconds, so we need
+        //   frequent updates to show intermediate states (Follower→Candidate→Leader)
+        // - Half the Raft tick: At 50ms (half of the 100ms tick interval), we catch
+        //   state changes quickly without polling faster than Raft can progress
+        // - Low overhead: Status query is a single channel send/recv, negligible cost
+        //   at 20Hz update rate
         if app.last_status_update.elapsed() >= Duration::from_millis(50) {
             app.update_status();
         }
